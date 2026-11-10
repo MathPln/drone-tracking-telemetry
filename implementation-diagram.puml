@@ -32,7 +32,7 @@ package "Zephyr RTOS Application" #FAFAFA {
     folder "Core & telemetry (Consumers)" #E3F2FD {
         [main.c\n(FSM & Stats)] as main_thread #90CAF9
         
-        database "Global Telemetry Struct\n(Protected by k_mutex)" as global_state #FFCC80
+        database "Telemetry struct\n(mutex)" as global_state #FFCC80
         
         [simu_telemetry.c] as simu_thread #90CAF9
     }
