@@ -131,6 +131,16 @@ void mpu6050_thread_entry(void *p1, void *p2, void *p3)
         return;
     }
 
+    /* Initialize attitude angles */
+    float roll = 0.0f;
+    float pitch = 0.0f;
+    float yaw = 0.0f;
+
+    /* Sampling period: 100 ms = 0.1 seconds */
+    const float dt = 0.1f;
+
+
+
     /* Sample every 100 ms */
     k_timer_start(&mpu6050_timer, K_NO_WAIT, K_MSEC(100));
 
@@ -140,6 +150,16 @@ void mpu6050_thread_entry(void *p1, void *p2, void *p3)
         struct mpu6050_data current_data = {0};
 
         if (mpu6050_read(&current_data) == 0) {
+
+            /* Calculate attitude using Euler integration */
+            roll += current_data.gx * dt;
+            pitch += current_data.gy * dt;
+            yaw += current_data.gz * dt;
+
+
+
+
+
             printk("[Info]: Accel: X=%.2f Y=%.2f Z=%.2f m/s² | "
                    "Gyro: X=%.2f Y=%.2f Z=%.2f deg/s\n",
                    (double)current_data.ax,
@@ -148,6 +168,14 @@ void mpu6050_thread_entry(void *p1, void *p2, void *p3)
                    (double)current_data.gx,
                    (double)current_data.gy,
                    (double)current_data.gz);
+                
+                   
+            printk("[Info]: Attitude: Roll=%.2f Pitch=%.2f Yaw=%.2f deg\n",
+                   (double)roll,
+                   (double)pitch,
+                   (double)yaw);    
+
+
         } else {
             printk("[Error]: Failed to read MPU6050\n");
         }
