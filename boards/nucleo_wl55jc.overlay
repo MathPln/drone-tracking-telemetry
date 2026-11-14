@@ -1,0 +1,135 @@
+
+
+/ {
+	aliases {
+		/* RGB LED */
+		led-red    = &red_led;
+		led-green  = &green_led;
+		led-blue   = &blue_led;
+
+		/* User button B1 */
+		sw0        = &user_button;
+
+		/* Sensors and communication */
+		ldr-adc    = &adc1;
+		sensor-i2c = &i2c1;
+		gps-uart   = &usart1;
+	};
+
+	/* RGB LED - Common Anode */
+	rgb_leds {
+		compatible = "gpio-leds";
+
+		red_led: red_led_node {
+			gpios = <&gpiob 9 GPIO_ACTIVE_LOW>;
+			label = "RGB LED Red";
+		};
+
+		green_led: green_led_node {
+			gpios = <&gpiob 15 GPIO_ACTIVE_LOW>;
+			label = "RGB LED Green";
+		};
+
+		blue_led: blue_led_node {
+			gpios = <&gpiob 13 GPIO_ACTIVE_LOW>;
+			label = "RGB LED Blue";
+		};
+	};
+
+	/* Button B1 */
+	buttons {
+		compatible = "gpio-keys";
+
+		user_button: button_1 {
+			gpios = <&gpioa 0 (GPIO_PULL_UP | GPIO_ACTIVE_LOW)>;
+			label = "User Button B1";
+		};
+	};
+
+	/* LDR ADC input */
+	zephyr,user {
+		io-channels = <&adc1 5>;
+	};
+};
+
+/* --------------------------------------------------
+ * ADC1 - LDR sur PB1 / Canal 5
+ * -------------------------------------------------- */
+&adc1 {
+	status = "okay";
+	pinctrl-0 = <&adc_in5_pb1>;
+	pinctrl-names = "default";
+
+	#address-cells = <1>;
+	#size-cells = <0>;
+
+	channel@5 {
+		reg = <5>;
+		zephyr,gain = "ADC_GAIN_1";
+		zephyr,reference = "ADC_REF_INTERNAL";
+		zephyr,acquisition-time = <ADC_ACQ_TIME_DEFAULT>;
+		zephyr,resolution = <12>;
+	};
+};
+
+/* --------------------------------------------------
+ * I2C1 - MPU6050 + Si7021 sur PB8 (SCL) / PB7 (SDA)
+ * -------------------------------------------------- */
+&i2c1 {
+	status = "okay";
+	clock-frequency = <I2C_BITRATE_STANDARD>;
+	pinctrl-0 = <&i2c1_scl_pb8 &i2c1_sda_pb7>;
+	pinctrl-names = "default";
+
+	mpu6050: mpu6050@68 {
+		compatible = "invensense,mpu6050";
+		reg = <0x68>;
+		status = "okay";
+	};
+
+	si7021: si7021@40 {
+		compatible = "silabs,si7021";
+		reg = <0x40>;
+		status = "okay";
+	};
+};
+
+/* --------------------------------------------------
+ * USART1 - GPS PA6H sur PA9 (TX) / PA10 (RX)
+ * -------------------------------------------------- */
+&usart1 {
+	status = "okay";
+	current-speed = <9600>;
+	pinctrl-0 = <&usart1_tx_pa9 &usart1_rx_pa10>;
+	pinctrl-names = "default";
+};
+
+/* --------------------------------------------------
+ * Configurations des broches (Pin Control STM32)
+ * -------------------------------------------------- */
+&pinctrl {
+	adc_in5_pb1: adc_in5_pb1 {
+		pinmux = <STM32_PINMUX('B', 1, ANALOG)>;
+	};
+
+	usart1_tx_pa9: usart1_tx_pa9 {
+		pinmux = <STM32_PINMUX('A', 9, AF7)>;
+		bias-pull-up;
+	};
+
+	usart1_rx_pa10: usart1_rx_pa10 {
+		pinmux = <STM32_PINMUX('A', 10, AF7)>;
+	};
+
+	i2c1_scl_pb8: i2c1_scl_pb8 {
+		pinmux = <STM32_PINMUX('B', 8, AF4)>;
+		bias-pull-up;
+		drive-open-drain;
+	};
+
+	i2c1_sda_pb7: i2c1_sda_pb7 {
+		pinmux = <STM32_PINMUX('B', 7, AF4)>;
+		bias-pull-up;
+		drive-open-drain;
+	};
+};
