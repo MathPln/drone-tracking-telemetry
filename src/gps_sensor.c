@@ -53,23 +53,24 @@ void gps_thread_entry(void *p1, void *p2, void *p3)
                 /* Filter for GPGGA sentences (fix data) */
                 if (strncmp(nmea_buffer, "$GPGGA", 6) == 0) {
                     char time_str[16], lat_dir, lon_dir, fix_quality_str[4];
-                    float raw_lat = 0.0f, raw_lon = 0.0f;
-                    float altitude = 0.0f;
-                    int fix_quality = 0;
+                    float raw_lat = 0.0f, raw_lon = 0.0f, altitude = 0.0f;
+                    int fix_quality = 0, satellites = 0;
 
                     int parsed = sscanf(nmea_buffer,
-                                        "$GPGGA,%15[^,],%f,%c,%f,%c,%3[^,],%*[^,],%*[^,],%f",
+                                        "$GPGGA,%15[^,],%f,%c,%f,%c,%3[^,],%d,%*[^,],%f",
                                         time_str, &raw_lat, &lat_dir, &raw_lon, &lon_dir,
-                                        fix_quality_str, &altitude);
+                                        fix_quality_str, &satellites, &altitude);
 
-                    if (parsed == 7) {
+                    if (parsed >= 8) {
                         if (strcmp(time_str, last_gga_time) == 0) {
                             buf_idx = 0;
                             continue;
                         }
                         snprintf(last_gga_time, sizeof(last_gga_time), "%s", time_str);
-
+                        snprintf(current_gps.utc, sizeof(current_gps.utc), "%s", time_str);
+                        
                         fix_quality = atoi(fix_quality_str);
+                        current_gps.satellites = (uint8_t)satellites;
 
                         /* Check if satellites have a valid fix */
                         if (fix_quality > 0) {
@@ -86,16 +87,16 @@ void gps_thread_entry(void *p1, void *p2, void *p3)
                         }
                     }
                 }
-                buf_idx = 0; /* Reset line buffer */
+                buf_idx = 0; 
             } else {
                 if (buf_idx < (NMEA_BUFFER_SIZE - 1)) {
                     nmea_buffer[buf_idx++] = rx_char;
                 } else {
-                    buf_idx = 0; /* Buffer overflow guard */
+                    buf_idx = 0; 
                 }
             }
         } else {
-            k_sleep(K_TICKS(1)); /* Sleep CPU quickly if no data available */
+            k_sleep(K_TICKS(1)); 
         }
     }
 }
