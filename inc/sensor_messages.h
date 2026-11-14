@@ -11,7 +11,8 @@ enum message_type {
     MSG_SENSOR_LDR,
     MSG_SENSOR_MPU,
     MSG_SENSOR_GPS,
-    MSG_SENSOR_ENV
+    MSG_SENSOR_ENV,
+    MSG_BUTTON_PRESSED
 };
 
 struct sensor_message {
