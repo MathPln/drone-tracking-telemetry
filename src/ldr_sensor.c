@@ -4,6 +4,9 @@
 #include <zephyr/sys/printk.h>
 #include <stdint.h>
 
+#include "ldr_sensor.h"
+#include "sensor_messages.h"
+
 /* Semaphore for synchronization between the hardware timer and the thread */
 K_SEM_DEFINE(ldr_sample_sem, 0, 1);
 
@@ -64,7 +67,15 @@ void ldr_thread_entry(void *p1, void *p2, void *p3)
                 percent = 100;
             }
 
-            printk("[Info]: LDR ADC raw: %d | Brightness: %d%%\n", (int)raw, percent);
+            /* Send LDR measurements to the central thread */
+            struct sensor_message msg = {
+                .type = MSG_SENSOR_LDR,
+                .data.ldr.raw = (uint16_t)raw,
+                .data.ldr.brightness = (uint8_t)percent
+            };
+
+            k_msgq_put(&sensor_msgq, &msg, K_NO_WAIT);
+
         } else {
             printk("[Error]: ADC read failed with code %d\n", err);
         }

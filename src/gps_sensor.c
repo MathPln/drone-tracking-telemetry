@@ -7,6 +7,7 @@
 #include <stdlib.h>
 
 #include "gps_sensor.h"
+#include "sensor_messages.h"
 
 #define UART_NODE DT_ALIAS(gps_uart)
 static const struct device *uart_dev = DEVICE_DT_GET(UART_NODE);
@@ -77,14 +78,16 @@ void gps_thread_entry(void *p1, void *p2, void *p3)
                             current_gps.fix_valid = true;
                             current_gps.latitude = convert_nmea_to_decimal((double)raw_lat, lat_dir);
                             current_gps.longitude = convert_nmea_to_decimal((double)raw_lon, lon_dir);
-                            current_gps.altitude = (double)altitude;
-                            printk("[Info]: GPS Fix Valid | UTC: %s, Lat: %.6f, Lon: %.6f, Alt: %.1f m\n",
-                                   time_str, current_gps.latitude, current_gps.longitude,
-                                   (double)current_gps.altitude);
+                            current_gps.altitude = altitude;
                         } else {
                             current_gps.fix_valid = false;
-                            printk("[Info]: GPS waiting for 3D fix...\n");
                         }
+
+                        struct sensor_message msg = {
+                            .type = MSG_SENSOR_GPS,
+                            .data.gps = current_gps
+                        };
+                        k_msgq_put(&sensor_msgq, &msg, K_NO_WAIT);
                     }
                 }
                 buf_idx = 0; 

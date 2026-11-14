@@ -4,6 +4,7 @@
 #include <stdint.h>
 
 #include "temp_hum_sensor.h"
+#include "sensor_messages.h"
 
 /* Semaphore synchronizing the sampling timer with the thread */
 K_SEM_DEFINE(temp_hum_sample_sem, 0, 1);
@@ -57,10 +58,20 @@ void temp_hum_thread_entry(void *p1, void *p2, void *p3)
             current_data.humidity = (125.0f * (float)raw_hum / 65536.0f) - 6.0f;
 
             /* Clamp humidity within 0-100% range */
-            if (current_data.humidity < 0.0f) current_data.humidity = 0.0f;
-            if (current_data.humidity > 100.0f) current_data.humidity = 100.0f;
+            if (current_data.humidity < 0.0f) {
+                current_data.humidity = 0.0f;
+            }
 
-            printk("[Info]: Si7021 Temp: %.2f °C | Humidity: %.2f %%\n", (double)current_data.temperature, (double)current_data.humidity);
+            if (current_data.humidity > 100.0f) {
+                current_data.humidity = 100.0f;
+            }
+
+            /* Send environmental data to the central thread */
+            struct sensor_message msg = {
+                .type = MSG_SENSOR_ENV,
+                .data.env = current_data
+            };
+            k_msgq_put(&sensor_msgq, &msg, K_NO_WAIT);
         } else {
             printk("[Error]: Failed to read Si7021 humidity\n");
         }

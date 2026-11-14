@@ -4,11 +4,18 @@
 #include <stdint.h>
 
 struct mpu6050_data {
-    float ax, ay, az;  // Acceleration in m/s²
-    float gx, gy, gz;  // Angular velocity in deg/s
+    float ax, ay, az;
+    float gx, gy, gz;
+};
+
+struct imu_message {
+    struct mpu6050_data measurements;
+    float roll;
+    float pitch;
+    float yaw;
 };
 
 int mpu6050_init(void);
 int mpu6050_read(struct mpu6050_data *data);
 
-#endif
+#endif /* MPU_SENSOR_H */

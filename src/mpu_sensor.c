@@ -1,4 +1,3 @@
-
 #include <zephyr/kernel.h>
 #include <zephyr/device.h>
 #include <zephyr/drivers/i2c.h>
@@ -6,14 +5,13 @@
 #include <stdint.h>
 
 #include "mpu_sensor.h"
+#include "sensor_messages.h"
 
 /* Semaphore synchronizing the timer with the IMU thread */
 K_SEM_DEFINE(mpu6050_sample_sem, 0, 1);
 
-/* I2C controller defined in the device tree */
 #define I2C_NODE DT_ALIAS(sensor_i2c)
 static const struct device *i2c_dev = DEVICE_DT_GET(I2C_NODE);
-
 #define MPU6050_ADDR 0x68
 
 /* MPU6050 register addresses */
@@ -44,39 +42,13 @@ int mpu6050_init(void)
         printk("[Error]: I2C bus not ready for MPU6050\n");
         return -1;
     }
-
-    /* Wake up the MPU6050 and select the X gyro clock */
-    if (i2c_reg_write_byte(i2c_dev, MPU6050_ADDR,
-                           REG_PWR_MGMT_1, 0x01) != 0) {
-        return -1;
-    }
-
+    if (i2c_reg_write_byte(i2c_dev, MPU6050_ADDR, REG_PWR_MGMT_1, 0x01) != 0) return -1;
     k_sleep(K_MSEC(100));
-
-    /* Enable digital low-pass filter */
-    if (i2c_reg_write_byte(i2c_dev, MPU6050_ADDR,
-                           REG_CONFIG, 0x03) != 0) {
-        return -1;
-    }
-
-    /* Set internal sampling rate to 10 Hz */
-    if (i2c_reg_write_byte(i2c_dev, MPU6050_ADDR,
-                           REG_SMPLRT_DIV, 99) != 0) {
-        return -1;
-    }
-
-    /* Accelerometer range: ±2g */
-    if (i2c_reg_write_byte(i2c_dev, MPU6050_ADDR,
-                           REG_ACCEL_CONFIG, 0x00) != 0) {
-        return -1;
-    }
-
-    /* Gyroscope range: ±250 degrees/s */
-    if (i2c_reg_write_byte(i2c_dev, MPU6050_ADDR,
-                           REG_GYRO_CONFIG, 0x00) != 0) {
-        return -1;
-    }
-
+    if (i2c_reg_write_byte(i2c_dev, MPU6050_ADDR, REG_CONFIG, 0x03) != 0) return -1;
+    if (i2c_reg_write_byte(i2c_dev, MPU6050_ADDR, REG_SMPLRT_DIV, 99) != 0) return -1;
+    if (i2c_reg_write_byte(i2c_dev, MPU6050_ADDR, REG_ACCEL_CONFIG, 0x00) != 0) return -1;
+    if (i2c_reg_write_byte(i2c_dev, MPU6050_ADDR, REG_GYRO_CONFIG, 0x00) != 0) return -1;
+    
     printk("[Info]: MPU6050 initialized successfully\n");
 
     return 0;
@@ -92,10 +64,7 @@ int mpu6050_read(struct mpu6050_data *data)
     uint8_t reg = REG_ACCEL_XOUT_H;
     uint8_t buffer[14];
 
-    if (i2c_write_read(i2c_dev, MPU6050_ADDR,
-                       &reg, 1, buffer, sizeof(buffer)) != 0) {
-        return -1;
-    }
+    if (i2c_write_read(i2c_dev, MPU6050_ADDR, &reg, 1, buffer, sizeof(buffer)) != 0) return -1;
 
     /* Convert received bytes into signed raw values */
     int16_t raw_ax = (int16_t)(((uint16_t)buffer[0] << 8) | buffer[1]);
@@ -139,8 +108,6 @@ void mpu6050_thread_entry(void *p1, void *p2, void *p3)
     /* Sampling period: 100 ms = 0.1 seconds */
     const float dt = 0.1f;
 
-
-
     /* Sample every 100 ms */
     k_timer_start(&mpu6050_timer, K_NO_WAIT, K_MSEC(100));
 
@@ -156,34 +123,20 @@ void mpu6050_thread_entry(void *p1, void *p2, void *p3)
             pitch += current_data.gy * dt;
             yaw += current_data.gz * dt;
 
-
-
-
-
-            printk("[Info]: Accel: X=%.2f Y=%.2f Z=%.2f m/s² | "
-                   "Gyro: X=%.2f Y=%.2f Z=%.2f deg/s\n",
-                   (double)current_data.ax,
-                   (double)current_data.ay,
-                   (double)current_data.az,
-                   (double)current_data.gx,
-                   (double)current_data.gy,
-                   (double)current_data.gz);
-                
-                   
-            printk("[Info]: Attitude: Roll=%.2f Pitch=%.2f Yaw=%.2f deg\n",
-                   (double)roll,
-                   (double)pitch,
-                   (double)yaw);    
-
-
+            struct sensor_message msg = {
+                .type = MSG_SENSOR_MPU,
+                .data.imu = {
+                    .measurements = current_data,
+                    .roll = roll,
+                    .pitch = pitch,
+                    .yaw = yaw
+                }
+            };
+            k_msgq_put(&sensor_msgq, &msg, K_NO_WAIT);
         } else {
             printk("[Error]: Failed to read MPU6050\n");
         }
     }
 }
 
-K_THREAD_DEFINE(mpu6050_thread_id, 1024,
-                mpu6050_thread_entry,
-                NULL, NULL, NULL,
-                7, 0, 0);
-
+K_THREAD_DEFINE(mpu6050_thread_id, 1024, mpu6050_thread_entry, NULL, NULL, NULL, 7, 0, 0);
