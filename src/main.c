@@ -98,7 +98,7 @@ static void button_pressed(const struct device *dev, struct gpio_callback *cb, g
 /* Timer for 2-second periodic report in TEST mode */
 static void test_timer_handler(struct k_timer *timer_id)
 {
-    struct sensor_message msg = { .type = MSG_TIMER_2S };
+    struct sensor_message msg = { .type = MSG_TIMER_TEST };
     k_msgq_put(&sensor_msgq, &msg, K_NO_WAIT);
 }
 K_TIMER_DEFINE(test_timer, test_timer_handler, NULL);
@@ -148,6 +148,13 @@ static void update_motion_detection(const struct imu_message *imu)
         }
     }
 }
+/* Timer for 10Hz (100ms) cadencing in SIMU mode */
+static void simu_timer_handler(struct k_timer *timer_id)
+{
+    struct sensor_message msg = { .type = MSG_TIMER_SIMU };
+    k_msgq_put(&sensor_msgq, &msg, K_NO_WAIT);
+}
+K_TIMER_DEFINE(simu_timer, simu_timer_handler, NULL);
 
 int main(void)
 {
@@ -213,8 +220,11 @@ int main(void)
                         stats_deadline = k_uptime_get() + STATS_PERIOD_MS;
                     } else if (current_mode == MODE_NORMAL) {
                         current_mode = MODE_SIMU;
+                        /* Start the 10Hz SIMU timer (100ms period) */
+                        k_timer_start(&simu_timer, K_MSEC(100), K_MSEC(100));
                     } else {
                         current_mode = MODE_TEST;
+                        k_timer_stop(&simu_timer); /* Stop SIMU timer */
                         k_timer_start(&test_timer, K_SECONDS(2), K_SECONDS(2)); /* Restart periodic print */
                         if (rgb_ready) {
                             set_color(0, 0, 1); /* Turn on TEST mode LED */
@@ -248,8 +258,8 @@ int main(void)
                     }
                     break;
 
-                case MSG_TIMER_2S:
-                    /* Periodic report output triggered by the timer */
+                case MSG_TIMER_TEST:
+                    /* Periodic report output triggered by the timer in TEST mode */
                     if (current_mode == MODE_TEST) {
                         printk("\n--- [TEST MODE] REPORT ---\n");
                         printk("LDR: Brightness: %u%%\n", last_ldr.brightness);
@@ -267,6 +277,13 @@ int main(void)
                             printk("GPS: Waiting for 3D fix...\n");
                         }
                         printk("-------------------------------\n");
+                    }
+                    break;
+
+                case MSG_TIMER_SIMU:
+                    /* 10Hz tick for SIMU mode frame generation */
+                    if (current_mode == MODE_SIMU) {
+                        /* TODO: Construct and transmit SIMU frame */
                     }
                     break;
 
