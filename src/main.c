@@ -17,6 +17,14 @@ static const struct gpio_dt_spec led_blue = GPIO_DT_SPEC_GET(DT_ALIAS(led_blue),
 static struct gpio_callback button_cb;
 static bool rgb_ready;
 
+/* Set RGB color using logical GPIO states */
+static void set_color(int red, int green, int blue)
+{
+    gpio_pin_set_dt(&led_red, red);
+    gpio_pin_set_dt(&led_green, green);
+    gpio_pin_set_dt(&led_blue, blue);
+}
+
 /* Tracker modes */
 enum tracker_mode { MODE_TEST, MODE_NORMAL, MODE_SIMU };
 static enum tracker_mode current_mode = MODE_TEST;
@@ -87,7 +95,7 @@ int main(void)
     /* Start the 2-second timer and turn on blue LED for TEST mode */
     k_timer_start(&test_timer, K_SECONDS(2), K_SECONDS(2));
     if (rgb_ready) {
-        gpio_pin_set_dt(&led_blue, 1);
+        set_color(0, 0, 1);
     }
 
     struct sensor_message msg;
@@ -111,7 +119,7 @@ int main(void)
                         current_mode = MODE_NORMAL;
                         k_timer_stop(&test_timer); /* Stop periodic print */
                         if (rgb_ready) {
-                            gpio_pin_set_dt(&led_blue, 0); /* Turn off TEST mode LED */
+                            set_color(0, 0, 0); /* Turn off TEST mode LED */
                         }
                         statistics_reset();
                         stats_deadline = k_uptime_get() + STATS_PERIOD_MS;
@@ -121,7 +129,7 @@ int main(void)
                         current_mode = MODE_TEST;
                         k_timer_start(&test_timer, K_SECONDS(2), K_SECONDS(2)); /* Restart periodic print */
                         if (rgb_ready) {
-                            gpio_pin_set_dt(&led_blue, 1); /* Turn on TEST mode LED */
+                            set_color(0, 0, 1); /* Turn on TEST mode LED */
                         }
                     }
                     
