@@ -2,6 +2,7 @@
 #define SENSOR_MESSAGES_H
 
 #include <zephyr/kernel.h>
+#include <stdbool.h>
 #include "gps_sensor.h"
 #include "ldr_sensor.h"
 #include "temp_hum_sensor.h"
@@ -13,7 +14,21 @@ enum message_type {
     MSG_SENSOR_GPS,
     MSG_SENSOR_ENV,
     MSG_BUTTON_PRESSED,
-    MSG_TIMER_2S
+    MSG_TIMER_2S,
+    MSG_SENSOR_FAULT
+};
+
+enum sensor_id {
+    SENSOR_LDR,
+    SENSOR_MPU,
+    SENSOR_GPS,
+    SENSOR_ENV
+};
+
+struct sensor_fault {
+    enum sensor_id sensor;
+    bool active;
+    int error_code;
 };
 
 struct sensor_message {
@@ -23,6 +38,7 @@ struct sensor_message {
         struct imu_message imu;
         struct gps_data gps;
         struct env_data env;
+        struct sensor_fault fault;
     } data;
 };
 
