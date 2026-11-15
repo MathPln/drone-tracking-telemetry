@@ -5,13 +5,17 @@
 #include "sensor_messages.h"
 #include "statistics.h"
 
-
 /* Central message queue definition */
 K_MSGQ_DEFINE(sensor_msgq, sizeof(struct sensor_message), 10, 4);
 
-/* B1 button configuration */
+/* B1 button and RGB LED configuration */
 static const struct gpio_dt_spec button = GPIO_DT_SPEC_GET(DT_ALIAS(sw0), gpios);
+static const struct gpio_dt_spec led_red = GPIO_DT_SPEC_GET(DT_ALIAS(led_red), gpios);
+static const struct gpio_dt_spec led_green = GPIO_DT_SPEC_GET(DT_ALIAS(led_green), gpios);
+static const struct gpio_dt_spec led_blue = GPIO_DT_SPEC_GET(DT_ALIAS(led_blue), gpios);
+
 static struct gpio_callback button_cb;
+static bool rgb_ready;
 
 /* Tracker modes */
 enum tracker_mode { MODE_TEST, MODE_NORMAL, MODE_SIMU };
@@ -26,6 +30,18 @@ static struct imu_message last_imu;
 static struct gps_data last_gps;
 static struct env_data last_env;
 
+/* Initialize RGB LED */
+static void rgb_init(void)
+{
+    if (gpio_is_ready_dt(&led_red) && gpio_is_ready_dt(&led_green) && gpio_is_ready_dt(&led_blue)) {
+        gpio_pin_configure_dt(&led_red, GPIO_OUTPUT_INACTIVE);
+        gpio_pin_configure_dt(&led_green, GPIO_OUTPUT_INACTIVE);
+        gpio_pin_configure_dt(&led_blue, GPIO_OUTPUT_INACTIVE);
+        rgb_ready = true;
+    } else {
+        printk("[ERROR] RGB LED not ready\n");
+    }
+}
 
 /* Button interrupt callback */
 static void button_pressed(const struct device *dev, struct gpio_callback *cb, gpio_port_pins_t pins)
@@ -53,8 +69,10 @@ K_TIMER_DEFINE(test_timer, test_timer_handler, NULL);
 int main(void)
 {
     printk("[INFO] Main thread started - MSGQ initialized\n");
-    /* Initialize the statistics module */
+    
+    /* Initialize the statistics module and LEDs */
     statistics_init();
+    rgb_init();
 
     /* Initialize B1 button GPIO */
     if (gpio_is_ready_dt(&button)) {
@@ -66,8 +84,11 @@ int main(void)
     
     printk("[MODE] TEST\n");
     
-    /* Start the 2-second timer for TEST mode */
+    /* Start the 2-second timer and turn on blue LED for TEST mode */
     k_timer_start(&test_timer, K_SECONDS(2), K_SECONDS(2));
+    if (rgb_ready) {
+        gpio_pin_set_dt(&led_blue, 1);
+    }
 
     struct sensor_message msg;
     /* Deadline for the next statistics report */
@@ -89,6 +110,9 @@ int main(void)
                     if (current_mode == MODE_TEST) {
                         current_mode = MODE_NORMAL;
                         k_timer_stop(&test_timer); /* Stop periodic print */
+                        if (rgb_ready) {
+                            gpio_pin_set_dt(&led_blue, 0); /* Turn off TEST mode LED */
+                        }
                         statistics_reset();
                         stats_deadline = k_uptime_get() + STATS_PERIOD_MS;
                     } else if (current_mode == MODE_NORMAL) {
@@ -96,6 +120,9 @@ int main(void)
                     } else {
                         current_mode = MODE_TEST;
                         k_timer_start(&test_timer, K_SECONDS(2), K_SECONDS(2)); /* Restart periodic print */
+                        if (rgb_ready) {
+                            gpio_pin_set_dt(&led_blue, 1); /* Turn on TEST mode LED */
+                        }
                     }
                     
                     printk("[MODE] %s\n", 
