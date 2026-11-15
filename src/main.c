@@ -20,6 +20,12 @@ static enum tracker_mode current_mode = MODE_TEST;
 /* Statistics collection period in NORMAL mode */
 #define STATS_PERIOD_MS 30000
 
+/* Cached sensor data for periodic printing in TEST mode */
+static struct ldr_data last_ldr;
+static struct imu_message last_imu;
+static struct gps_data last_gps;
+static struct env_data last_env;
+
 
 /* Button interrupt callback */
 static void button_pressed(const struct device *dev, struct gpio_callback *cb, gpio_port_pins_t pins)
@@ -88,26 +94,16 @@ int main(void)
                     break;
 
                 case MSG_SENSOR_LDR:
-                    printk("[MSGQ LDR] Raw: %u | Brightness: %u%%\n", 
-                           msg.data.ldr.raw, 
-                           msg.data.ldr.brightness);
+                    last_ldr = msg.data.ldr;
+                    
                     if (current_mode == MODE_NORMAL) {
                         statistics_add_light(msg.data.ldr.brightness);
                     }       
                     break;
 
                 case MSG_SENSOR_MPU:
-                    printk("[MSGQ MPU] Accel (m/s2): X=%.2f Y=%.2f Z=%.2f | Gyro (deg/s): X=%.2f Y=%.2f Z=%.2f\n", 
-                           (double)msg.data.imu.measurements.ax, 
-                           (double)msg.data.imu.measurements.ay, 
-                           (double)msg.data.imu.measurements.az,
-                           (double)msg.data.imu.measurements.gx, 
-                           (double)msg.data.imu.measurements.gy, 
-                           (double)msg.data.imu.measurements.gz);
-                    printk("[MSGQ MPU] Attitude (deg): Roll=%.2f Pitch=%.2f Yaw=%.2f\n",
-                           (double)msg.data.imu.roll, 
-                           (double)msg.data.imu.pitch, 
-                           (double)msg.data.imu.yaw);
+                    last_imu = msg.data.imu;
+                    
                     if (current_mode == MODE_NORMAL) {
                         statistics_add_imu(
                         msg.data.imu.measurements.ax,
@@ -121,22 +117,12 @@ int main(void)
                     break;
 
                 case MSG_SENSOR_GPS:
-                    if (msg.data.gps.fix_valid) {
-                        printk("[MSGQ GPS] Fix OK | UTC: %s | Sats: %u | Lat: %.6f | Lon: %.6f | Alt: %.1f m\n", 
-                               msg.data.gps.utc,
-                               msg.data.gps.satellites,
-                               msg.data.gps.latitude, 
-                               msg.data.gps.longitude,
-                               (double)msg.data.gps.altitude);
-                    } else {
-                        printk("[MSGQ GPS] Waiting for 3D fix...\n");
-                    }
+                    last_gps = msg.data.gps;
                     break;
 
                 case MSG_SENSOR_ENV:
-                    printk("[MSGQ ENV] Temp: %.2f C | Hum: %.2f %%\n", 
-                           (double)msg.data.env.temperature, 
-                           (double)msg.data.env.humidity);
+                    last_env = msg.data.env;
+                    
                     if (current_mode == MODE_NORMAL) {
                         statistics_add_environment(
                         msg.data.env.temperature,
