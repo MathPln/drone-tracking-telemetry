@@ -21,17 +21,17 @@
 		compatible = "gpio-leds";
 
 		red_led: red_led_node {
-			gpios = <&gpiob 9 GPIO_ACTIVE_LOW>;
+			gpios = <&gpioa 5 GPIO_ACTIVE_LOW>;
 			label = "RGB LED Red";
 		};
 
 		green_led: green_led_node {
-			gpios = <&gpiob 15 GPIO_ACTIVE_LOW>;
+			gpios = <&gpioa 6 GPIO_ACTIVE_LOW>;
 			label = "RGB LED Green";
 		};
 
 		blue_led: blue_led_node {
-			gpios = <&gpiob 13 GPIO_ACTIVE_LOW>;
+			gpios = <&gpioa 7 GPIO_ACTIVE_LOW>;
 			label = "RGB LED Blue";
 		};
 	};
