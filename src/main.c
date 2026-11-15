@@ -3,6 +3,8 @@
 #include <zephyr/drivers/gpio.h>
 #include <zephyr/devicetree.h>
 #include "sensor_messages.h"
+#include "statistics.h"
+
 
 /* Central message queue definition */
 K_MSGQ_DEFINE(sensor_msgq, sizeof(struct sensor_message), 10, 4);
@@ -14,6 +16,10 @@ static struct gpio_callback button_cb;
 /* Tracker modes */
 enum tracker_mode { MODE_TEST, MODE_NORMAL, MODE_SIMU };
 static enum tracker_mode current_mode = MODE_TEST;
+
+/* Statistics collection period in NORMAL mode */
+#define STATS_PERIOD_MS 30000
+
 
 /* Button interrupt callback */
 static void button_pressed(const struct device *dev, struct gpio_callback *cb, gpio_port_pins_t pins)
@@ -30,9 +36,13 @@ static void button_pressed(const struct device *dev, struct gpio_callback *cb, g
     k_msgq_put(&sensor_msgq, &msg, K_NO_WAIT);
 }
 
+
+
 int main(void)
 {
     printk("[INFO] Main thread started - MSGQ initialized\n");
+    /* Initialize the statistics module */
+    statistics_init();
 
     /* Initialize B1 button GPIO */
     if (gpio_is_ready_dt(&button)) {
@@ -45,16 +55,27 @@ int main(void)
     printk("[MODE] TEST\n");
 
     struct sensor_message msg;
+    /* Deadline for the next statistics report */
+    int64_t stats_deadline = 0;
+
 
     while (1) {
-        /* Wait forever for any sensor or button to put data in the queue */
-        if (k_msgq_get(&sensor_msgq, &msg, K_FOREVER) == 0) {
+        /* Wait for a message or until the next statistics deadline in NORMAL mode */
+        k_timeout_t timeout = K_FOREVER;
+        if (current_mode == MODE_NORMAL) {
+            int64_t remaining = stats_deadline - k_uptime_get();
+            timeout = (remaining <= 0) ? K_NO_WAIT : K_MSEC(remaining);
+        } 
+        if (k_msgq_get(&sensor_msgq, &msg, timeout) == 0) {
+        
             
             switch (msg.type) {
                 case MSG_BUTTON_PRESSED:
                     /* Mode transition logic: TEST -> NORMAL -> SIMU -> TEST */
                     if (current_mode == MODE_TEST) {
                         current_mode = MODE_NORMAL;
+                        statistics_reset();
+                        stats_deadline = k_uptime_get() + STATS_PERIOD_MS;
                     } else if (current_mode == MODE_NORMAL) {
                         current_mode = MODE_SIMU;
                     } else {
@@ -70,6 +91,9 @@ int main(void)
                     printk("[MSGQ LDR] Raw: %u | Brightness: %u%%\n", 
                            msg.data.ldr.raw, 
                            msg.data.ldr.brightness);
+                    if (current_mode == MODE_NORMAL) {
+                        statistics_add_light(msg.data.ldr.brightness);
+                    }       
                     break;
 
                 case MSG_SENSOR_MPU:
@@ -84,6 +108,16 @@ int main(void)
                            (double)msg.data.imu.roll, 
                            (double)msg.data.imu.pitch, 
                            (double)msg.data.imu.yaw);
+                    if (current_mode == MODE_NORMAL) {
+                        statistics_add_imu(
+                        msg.data.imu.measurements.ax,
+                        msg.data.imu.measurements.ay,
+                        msg.data.imu.measurements.az,
+                        msg.data.imu.measurements.gx,
+                        msg.data.imu.measurements.gy,
+                        msg.data.imu.measurements.gz
+                        );
+                    }       
                     break;
 
                 case MSG_SENSOR_GPS:
@@ -103,6 +137,12 @@ int main(void)
                     printk("[MSGQ ENV] Temp: %.2f C | Hum: %.2f %%\n", 
                            (double)msg.data.env.temperature, 
                            (double)msg.data.env.humidity);
+                    if (current_mode == MODE_NORMAL) {
+                        statistics_add_environment(
+                        msg.data.env.temperature,
+                        msg.data.env.humidity
+                        );
+                    }       
                     break;
                     
                 default:
@@ -110,6 +150,14 @@ int main(void)
                     break;
             }
         }
+        /* Print and reset statistics every 30 seconds in NORMAL mode */
+        if (current_mode == MODE_NORMAL &&
+            k_uptime_get() >= stats_deadline) {
+
+            statistics_print();
+            statistics_reset();
+            stats_deadline = k_uptime_get() + STATS_PERIOD_MS;
+            }   
     }
     return 0;
 }
