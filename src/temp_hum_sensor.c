@@ -2,6 +2,7 @@
 #include <zephyr/drivers/i2c.h>
 #include <zephyr/sys/printk.h>
 #include <stdint.h>
+#include <stdbool.h>
 
 #include "temp_hum_sensor.h"
 #include "sensor_messages.h"
@@ -24,10 +25,31 @@ static void temp_hum_timer_handler(struct k_timer *timer_id)
 
 K_TIMER_DEFINE(temp_hum_timer, temp_hum_timer_handler, NULL);
 
+/* Send Si7021 fault status to the central message queue */
+static void temp_hum_report_fault(bool active, int error_code)
+{
+    struct sensor_message msg = {
+        .type = MSG_SENSOR_FAULT,
+        .data.fault = {
+            .sensor = SENSOR_ENV,
+            .active = active,
+            .error_code = error_code
+        }
+    };
+
+    k_msgq_put(&sensor_msgq, &msg, K_NO_WAIT);
+}
+
+
+
 void temp_hum_thread_entry(void *p1, void *p2, void *p3)
 {
+    bool fault_active = false;
+
+
     if (!device_is_ready(i2c_dev)) {
         printk("[Error]: I2C bus not ready for Si7021\n");
+        temp_hum_report_fault(true, -1);
         return;
     }
 
@@ -47,12 +69,25 @@ void temp_hum_thread_entry(void *p1, void *p2, void *p3)
             current_data.temperature = (175.72f * (float)raw_temp / 65536.0f) - 46.85f;
         } else {
             printk("[Error]: Failed to read Si7021 temperature\n");
+
+            if (!fault_active) {
+                temp_hum_report_fault(true, -1);
+                fault_active = true;
+            }
+
             continue;
         }
 
         /* Read Relative Humidity */
         uint8_t cmd_hum = SI7021_CMD_MEAS_HOLD_HUM;
         if (i2c_write_read(i2c_dev, SI7021_ADDR, &cmd_hum, 1, rx_buf, 2) == 0) {
+
+            /* Report recovery after a previous reading error */
+            if (fault_active) {
+                temp_hum_report_fault(false, 0);
+                fault_active = false;
+            }
+
             uint16_t raw_hum = (rx_buf[0] << 8) | rx_buf[1];
             /* Conversion formula from Si7021 datasheet: RH = (125 * raw / 65536) - 6 */
             current_data.humidity = (125.0f * (float)raw_hum / 65536.0f) - 6.0f;
@@ -74,6 +109,11 @@ void temp_hum_thread_entry(void *p1, void *p2, void *p3)
             k_msgq_put(&sensor_msgq, &msg, K_NO_WAIT);
         } else {
             printk("[Error]: Failed to read Si7021 humidity\n");
+
+            if (!fault_active) {
+                temp_hum_report_fault(true, -1);
+                fault_active = true;
+            }
         }
     }
 }
