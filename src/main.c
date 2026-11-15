@@ -5,7 +5,8 @@
 #include <math.h>
 #include "sensor_messages.h"
 #include "statistics.h"
-#include "rgb_led.h"
+
+
 
 
 /* Central message queue definition */
@@ -58,7 +59,7 @@ static void button_pressed(const struct device *dev, struct gpio_callback *cb, g
 {
     static int64_t last_press_ms;
     int64_t now = k_uptime_get();
-    
+
     /* 200ms debounce */
     if (now - last_press_ms < 200) return;
     last_press_ms = now;
@@ -146,14 +147,7 @@ int main(void)
     printk("[INFO] Main thread started - MSGQ initialized\n");
     /* Initialize the statistics module */
     statistics_init();
-    if (rgb_led_init() != 0) {
-        printk("[RGB] Initialization failed\n");
-        return -1;
-    }
-    
-    printk("[RGB] Initialization successful\n");
-    /* TEST mode is indicated by the blue LED */
-    rgb_led_set(false, false, true);
+
 
 
     /* Initialize B1 button GPIO */
@@ -163,11 +157,12 @@ int main(void)
         gpio_add_callback(button.port, &button_cb);
         gpio_pin_interrupt_configure_dt(&button, GPIO_INT_EDGE_TO_ACTIVE);
     }
-    
+
     printk("[MODE] TEST\n");
 
     struct sensor_message msg;
-    * Deadline for the next statistics report in NORMAL mode */
+
+    /* Deadline for the next statistics report in NORMAL mode */
     int64_t stats_deadline = 0;
 
 
@@ -189,8 +184,8 @@ int main(void)
 
 
         if (k_msgq_get(&sensor_msgq, &msg, timeout) == 0) {
-        
-            
+
+
             switch (msg.type) {
                 case MSG_BUTTON_PRESSED:
                     /* Mode transition logic: TEST -> NORMAL -> SIMU -> TEST */
@@ -208,48 +203,31 @@ int main(void)
                     printk("[MODE] %s\n", current_mode == MODE_TEST ? "TEST" :
                         (current_mode == MODE_NORMAL ? "NORMAL" : "SIMU"));
 
-                    /* Update LED according to the selected mode */
-                    if (current_mode == MODE_TEST) {
-                        rgb_led_set(false, false, true);
-                    } else if (current_mode == MODE_NORMAL) {
-                        switch (current_state) {
-                            case STATE_IDLE:
-                            rgb_led_set(false, true, false);
-                            break;
-                        case STATE_FLYING:
-                            rgb_led_set(true, true, false);
-                            break;
-                        case STATE_PROBLEM:
-                            rgb_led_set(true, false, false);
-                            break;
-                        }
-                    }
-
                     break;
 
                 case MSG_SENSOR_LDR:
-                    printk("[MSGQ LDR] Raw: %u | Brightness: %u%%\n", 
-                           msg.data.ldr.raw, 
+                    printk("[MSGQ LDR] Raw: %u | Brightness: %u%%\n",
+                           msg.data.ldr.raw,
                            msg.data.ldr.brightness);
                     if (current_mode == MODE_NORMAL) {
                         statistics_add_light(msg.data.ldr.brightness);
-                    }       
+                    }
                     break;
 
                 case MSG_SENSOR_MPU:
-                    printk("[MSGQ MPU] Accel (m/s2): X=%.2f Y=%.2f Z=%.2f | Gyro (deg/s): X=%.2f Y=%.2f Z=%.2f\n", 
-                           (double)msg.data.imu.measurements.ax, 
-                           (double)msg.data.imu.measurements.ay, 
+                    printk("[MSGQ MPU] Accel (m/s2): X=%.2f Y=%.2f Z=%.2f | Gyro (deg/s): X=%.2f Y=%.2f Z=%.2f\n",
+                           (double)msg.data.imu.measurements.ax,
+                           (double)msg.data.imu.measurements.ay,
                            (double)msg.data.imu.measurements.az,
-                           (double)msg.data.imu.measurements.gx, 
-                           (double)msg.data.imu.measurements.gy, 
+                           (double)msg.data.imu.measurements.gx,
+                           (double)msg.data.imu.measurements.gy,
                            (double)msg.data.imu.measurements.gz);
                     printk("[MSGQ MPU] Attitude (deg): Roll=%.2f Pitch=%.2f Yaw=%.2f\n",
-                           (double)msg.data.imu.roll, 
-                           (double)msg.data.imu.pitch, 
+                           (double)msg.data.imu.roll,
+                           (double)msg.data.imu.pitch,
                            (double)msg.data.imu.yaw);
                     update_motion_detection(&msg.data.imu);
-            
+
                     if (current_mode == MODE_NORMAL) {
                         statistics_add_imu(
                         msg.data.imu.measurements.ax,
@@ -259,15 +237,15 @@ int main(void)
                         msg.data.imu.measurements.gy,
                         msg.data.imu.measurements.gz
                         );
-                    }       
+                    }
                     break;
 
                 case MSG_SENSOR_GPS:
                     if (msg.data.gps.fix_valid) {
-                        printk("[MSGQ GPS] Fix OK | UTC: %s | Sats: %u | Lat: %.6f | Lon: %.6f | Alt: %.1f m\n", 
+                        printk("[MSGQ GPS] Fix OK | UTC: %s | Sats: %u | Lat: %.6f | Lon: %.6f | Alt: %.1f m\n",
                                msg.data.gps.utc,
                                msg.data.gps.satellites,
-                               msg.data.gps.latitude, 
+                               msg.data.gps.latitude,
                                msg.data.gps.longitude,
                                (double)msg.data.gps.altitude);
                     } else {
@@ -276,22 +254,22 @@ int main(void)
                     break;
 
                 case MSG_SENSOR_ENV:
-                    printk("[MSGQ ENV] Temp: %.2f C | Hum: %.2f %%\n", 
-                           (double)msg.data.env.temperature, 
+                    printk("[MSGQ ENV] Temp: %.2f C | Hum: %.2f %%\n",
+                           (double)msg.data.env.temperature,
                            (double)msg.data.env.humidity);
                     if (current_mode == MODE_NORMAL) {
                         statistics_add_environment(
                         msg.data.env.temperature,
                         msg.data.env.humidity
                         );
-                    }       
+                    }
                     break;
 
                 case MSG_SENSOR_FAULT:
                     if (msg.data.fault.sensor < 4) {
                         enum sensor_id id = msg.data.fault.sensor;
 
-                        if (msg.data.fault.active) {  
+                        if (msg.data.fault.active) {
                             if (!sensor_fault_active[id]) {
                                 sensor_fault_start[id] = k_uptime_get();
                                 printk("[FAULT] Sensor %d error: %d\n",
@@ -308,7 +286,7 @@ int main(void)
                     }
                     break;
 
-                                    
+
                 default:
                     printk("[MSGQ] Unknown message type received\n");
                     break;
@@ -357,22 +335,6 @@ int main(void)
                 break;
             }
 
-            /* Update state LED only in NORMAL mode */
-            if (current_mode == MODE_NORMAL) {
-                switch (current_state) {
-                    case STATE_IDLE:
-                    rgb_led_set(false, true, false);
-                    break;
-
-                    case STATE_FLYING:
-                    rgb_led_set(true, true, false);
-                    break;
-
-                    case STATE_PROBLEM:
-                    rgb_led_set(true, false, false);
-                    break;
-                }
-            }
         }
 
         /* Print and reset statistics every 30 seconds in NORMAL mode */
@@ -383,7 +345,7 @@ int main(void)
             statistics_print();
             statistics_reset();
             stats_deadline = k_uptime_get() + STATS_PERIOD_MS;
-            }   
+            }
     }
     return 0;
 }
