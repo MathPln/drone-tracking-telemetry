@@ -170,7 +170,7 @@ int main(void)
     /* Start the 2-second timer and turn on blue LED for TEST mode */
     k_timer_start(&test_timer, K_SECONDS(2), K_SECONDS(2));
     if (rgb_ready) {
-        gpio_pin_set_dt(&led_blue, 1);
+        set_color(0, 0, 1);
     }
 
     /* Start the 2-second timer and turn on blue LED for TEST mode */
