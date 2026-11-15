@@ -166,6 +166,9 @@ int main(void)
     }
 
     printk("[MODE] TEST\n");
+    
+    /* Start the 2-second timer for TEST mode */
+    k_timer_start(&test_timer, K_SECONDS(2), K_SECONDS(2));
 
     /* Start the 2-second timer and turn on blue LED for TEST mode */
     k_timer_start(&test_timer, K_SECONDS(2), K_SECONDS(2));
@@ -218,6 +221,28 @@ int main(void)
                     printk("[MODE] %s\n", 
                            current_mode == MODE_TEST ? "TEST" : 
                         (current_mode == MODE_NORMAL ? "NORMAL" : "SIMU"));
+                    break;
+
+                case MSG_TIMER_2S:
+                    /* Periodic report output triggered by the timer */
+                    if (current_mode == MODE_TEST) {
+                        printk("\n--- [TEST MODE] REPORT ---\n");
+                        printk("LDR: Brightness: %u%%\n", last_ldr.brightness);
+                        printk("ENV: Temp: %.2f C | Hum: %.2f %%\n", 
+                               (double)last_env.temperature, (double)last_env.humidity);
+                        
+                        printk("IMU: Gyro(deg/s) X=%.2f Y=%.2f Z=%.2f | Accel(m/s2) X=%.2f Y=%.2f Z=%.2f\n", 
+                               (double)last_imu.measurements.gx, (double)last_imu.measurements.gy, (double)last_imu.measurements.gz,
+                               (double)last_imu.measurements.ax, (double)last_imu.measurements.ay, (double)last_imu.measurements.az);
+                        
+                        if (last_gps.fix_valid) {
+                            printk("GPS: Fix OK | UTC: %s | Sats: %u | Lat: %.6f | Lon: %.6f | Alt: %.1f m\n", 
+                                   last_gps.utc, last_gps.satellites, last_gps.latitude, last_gps.longitude, (double)last_gps.altitude);
+                        } else {
+                            printk("GPS: Waiting for 3D fix...\n");
+                        }
+                        printk("-------------------------------\n");
+                    }
                     break;
 
                 case MSG_TIMER_2S:
