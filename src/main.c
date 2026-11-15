@@ -42,7 +42,13 @@ static void button_pressed(const struct device *dev, struct gpio_callback *cb, g
     k_msgq_put(&sensor_msgq, &msg, K_NO_WAIT);
 }
 
-
+/* Timer for 2-second periodic report in TEST mode */
+static void test_timer_handler(struct k_timer *timer_id)
+{
+    struct sensor_message msg = { .type = MSG_TIMER_2S };
+    k_msgq_put(&sensor_msgq, &msg, K_NO_WAIT);
+}
+K_TIMER_DEFINE(test_timer, test_timer_handler, NULL);
 
 int main(void)
 {
@@ -59,11 +65,13 @@ int main(void)
     }
     
     printk("[MODE] TEST\n");
+    
+    /* Start the 2-second timer for TEST mode */
+    k_timer_start(&test_timer, K_SECONDS(2), K_SECONDS(2));
 
     struct sensor_message msg;
     /* Deadline for the next statistics report */
     int64_t stats_deadline = 0;
-
 
     while (1) {
         /* Wait for a message or until the next statistics deadline in NORMAL mode */
@@ -72,25 +80,49 @@ int main(void)
             int64_t remaining = stats_deadline - k_uptime_get();
             timeout = (remaining <= 0) ? K_NO_WAIT : K_MSEC(remaining);
         } 
-        if (k_msgq_get(&sensor_msgq, &msg, timeout) == 0) {
         
+        if (k_msgq_get(&sensor_msgq, &msg, timeout) == 0) {
             
             switch (msg.type) {
                 case MSG_BUTTON_PRESSED:
                     /* Mode transition logic: TEST -> NORMAL -> SIMU -> TEST */
                     if (current_mode == MODE_TEST) {
                         current_mode = MODE_NORMAL;
+                        k_timer_stop(&test_timer); /* Stop periodic print */
                         statistics_reset();
                         stats_deadline = k_uptime_get() + STATS_PERIOD_MS;
                     } else if (current_mode == MODE_NORMAL) {
                         current_mode = MODE_SIMU;
                     } else {
                         current_mode = MODE_TEST;
+                        k_timer_start(&test_timer, K_SECONDS(2), K_SECONDS(2)); /* Restart periodic print */
                     }
                     
                     printk("[MODE] %s\n", 
                            current_mode == MODE_TEST ? "TEST" : 
                           (current_mode == MODE_NORMAL ? "NORMAL" : "SIMU"));
+                    break;
+
+                case MSG_TIMER_2S:
+                    /* Periodic report output triggered by the timer */
+                    if (current_mode == MODE_TEST) {
+                        printk("\n--- [TEST MODE] REPORT ---\n");
+                        printk("LDR: Brightness: %u%%\n", last_ldr.brightness);
+                        printk("ENV: Temp: %.2f C | Hum: %.2f %%\n", 
+                               (double)last_env.temperature, (double)last_env.humidity);
+                        
+                        printk("IMU: Gyro(deg/s) X=%.2f Y=%.2f Z=%.2f | Accel(m/s2) X=%.2f Y=%.2f Z=%.2f\n", 
+                               (double)last_imu.measurements.gx, (double)last_imu.measurements.gy, (double)last_imu.measurements.gz,
+                               (double)last_imu.measurements.ax, (double)last_imu.measurements.ay, (double)last_imu.measurements.az);
+                        
+                        if (last_gps.fix_valid) {
+                            printk("GPS: Fix OK | UTC: %s | Sats: %u | Lat: %.6f | Lon: %.6f | Alt: %.1f m\n", 
+                                   last_gps.utc, last_gps.satellites, last_gps.latitude, last_gps.longitude, (double)last_gps.altitude);
+                        } else {
+                            printk("GPS: Waiting for 3D fix...\n");
+                        }
+                        printk("-------------------------------\n");
+                    }
                     break;
 
                 case MSG_SENSOR_LDR:
@@ -136,14 +168,13 @@ int main(void)
                     break;
             }
         }
+        
         /* Print and reset statistics every 30 seconds in NORMAL mode */
-        if (current_mode == MODE_NORMAL &&
-            k_uptime_get() >= stats_deadline) {
-
+        if (current_mode == MODE_NORMAL && k_uptime_get() >= stats_deadline) {
             statistics_print();
             statistics_reset();
             stats_deadline = k_uptime_get() + STATS_PERIOD_MS;
-            }   
+        }   
     }
     return 0;
 }
