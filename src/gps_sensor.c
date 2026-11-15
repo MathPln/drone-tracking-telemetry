@@ -5,12 +5,30 @@
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdbool.h>
+
 
 #include "gps_sensor.h"
 #include "sensor_messages.h"
 
 #define UART_NODE DT_ALIAS(gps_uart)
 static const struct device *uart_dev = DEVICE_DT_GET(UART_NODE);
+
+/* Send GPS fault status to the central message queue */
+static void gps_report_fault(bool active, int error_code)
+{
+    struct sensor_message msg = {
+        .type = MSG_SENSOR_FAULT,
+        .data.fault = {
+            .sensor = SENSOR_GPS,
+            .active = active,
+            .error_code = error_code
+        }
+    };
+
+    k_msgq_put(&sensor_msgq, &msg, K_NO_WAIT);
+}
+
 
 #define NMEA_BUFFER_SIZE 128
 
@@ -31,6 +49,7 @@ void gps_thread_entry(void *p1, void *p2, void *p3)
 {
     if (!device_is_ready(uart_dev)) {
         printk("[Error]: GPS UART device not ready\n");
+        gps_report_fault(true, -1);
         return;
     }
 

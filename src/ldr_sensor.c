@@ -3,6 +3,7 @@
 #include <zephyr/devicetree.h>
 #include <zephyr/sys/printk.h>
 #include <stdint.h>
+#include <stdbool.h>
 
 #include "ldr_sensor.h"
 #include "sensor_messages.h"
@@ -14,6 +15,25 @@ K_SEM_DEFINE(ldr_sample_sem, 0, 1);
 #define ADC_NODE DT_PATH(zephyr_user)
 static const struct adc_dt_spec adc_channel = ADC_DT_SPEC_GET(ADC_NODE);
 
+/* Send LDR fault status to the central message queue */
+static void ldr_report_fault(bool active, int error_code)
+{
+    struct sensor_message msg = {
+        .type = MSG_SENSOR_FAULT,
+        .data.fault = {
+            .sensor = SENSOR_LDR,
+            .active = active,
+            .error_code = error_code
+        }
+    };
+
+    k_msgq_put(&sensor_msgq, &msg, K_NO_WAIT);
+}
+
+
+
+
+
 /* Timer callback: simply gives the semaphore to unblock the thread */
 void ldr_timer_handler(struct k_timer *timer_id)
 {
@@ -24,14 +44,19 @@ K_TIMER_DEFINE(ldr_timer, ldr_timer_handler, NULL);
 
 void ldr_thread_entry(void *p1, void *p2, void *p3)
 {
+    bool fault_active = false;
+
+
     if (!adc_is_ready_dt(&adc_channel)) {
         printk("[Error]: ADC not ready\n");
+        ldr_report_fault(true, -1);
         return;
     }
 
     int err = adc_channel_setup_dt(&adc_channel);
     if (err < 0) {
         printk("[Error]: ADC setup failed with code %d\n", err);
+        ldr_report_fault(true, err);
         return;
     }
 
@@ -52,7 +77,16 @@ void ldr_thread_entry(void *p1, void *p2, void *p3)
         err = adc_read_dt(&adc_channel, &sequence);
 
         if (err == 0) {
+
+            /* Report recovery after a previous reading error */
+            if (fault_active) {
+                ldr_report_fault(false, 0);
+                fault_active = false;
+            }
+
             int32_t raw = sample_buffer;
+
+
 
             /* Calculate the maximum value for the ADC resolution. */
             int32_t max_raw = ((int32_t)1 << adc_channel.resolution) - 1;
@@ -78,6 +112,13 @@ void ldr_thread_entry(void *p1, void *p2, void *p3)
 
         } else {
             printk("[Error]: ADC read failed with code %d\n", err);
+
+            /* Report the error only once until recovery */
+            if (!fault_active) {    
+                ldr_report_fault(true, err);
+                fault_active = true;
+            }
+
         }
     }
 }

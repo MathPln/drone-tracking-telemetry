@@ -3,6 +3,7 @@
 #include <zephyr/drivers/i2c.h>
 #include <zephyr/sys/printk.h>
 #include <stdint.h>
+#include <stdbool.h>
 
 #include "mpu_sensor.h"
 #include "sensor_messages.h"
@@ -35,6 +36,24 @@ static void mpu6050_timer_handler(struct k_timer *timer_id)
 
 K_TIMER_DEFINE(mpu6050_timer, mpu6050_timer_handler, NULL);
 
+
+/* Send MPU6050 fault status to the central message queue */
+static void mpu6050_report_fault(bool active, int error_code)
+{
+    struct sensor_message msg = {
+        .type = MSG_SENSOR_FAULT,
+        .data.fault = {
+            .sensor = SENSOR_MPU,
+            .active = active,
+            .error_code = error_code
+        }
+    };
+
+    k_msgq_put(&sensor_msgq, &msg, K_NO_WAIT);
+}
+
+
+
 /* Initialize MPU6050 registers */
 int mpu6050_init(void)
 {
@@ -45,7 +64,7 @@ int mpu6050_init(void)
     if (i2c_reg_write_byte(i2c_dev, MPU6050_ADDR, REG_PWR_MGMT_1, 0x01) != 0) return -1;
     k_sleep(K_MSEC(100));
     if (i2c_reg_write_byte(i2c_dev, MPU6050_ADDR, REG_CONFIG, 0x03) != 0) return -1;
-    if (i2c_reg_write_byte(i2c_dev, MPU6050_ADDR, REG_SMPLRT_DIV, 99) != 0) return -1;
+    if (i2c_reg_write_byte(i2c_dev, MPU6050_ADDR, REG_SMPLRT_DIV, 49) != 0) return -1;
     if (i2c_reg_write_byte(i2c_dev, MPU6050_ADDR, REG_ACCEL_CONFIG, 0x00) != 0) return -1;
     if (i2c_reg_write_byte(i2c_dev, MPU6050_ADDR, REG_GYRO_CONFIG, 0x00) != 0) return -1;
     
@@ -93,10 +112,13 @@ int mpu6050_read(struct mpu6050_data *data)
 /* Independent MPU6050 acquisition thread */
 void mpu6050_thread_entry(void *p1, void *p2, void *p3)
 {
+    bool fault_active = false;
+
     printk("[Debug]: MPU6050 thread started\n");
 
     if (mpu6050_init() != 0) {
         printk("[Error]: MPU6050 initialization failed\n");
+        mpu6050_report_fault(true, -1);
         return;
     }
 
@@ -105,11 +127,11 @@ void mpu6050_thread_entry(void *p1, void *p2, void *p3)
     float pitch = 0.0f;
     float yaw = 0.0f;
 
-    /* Sampling period: 100 ms = 0.1 seconds */
-    const float dt = 0.1f;
+    /* Sampling period: 50 ms = 0.05 seconds */
+    const float dt = 0.05f;
 
-    /* Sample every 100 ms */
-    k_timer_start(&mpu6050_timer, K_NO_WAIT, K_MSEC(100));
+    /* Sample every 50 ms (20Hz) */
+    k_timer_start(&mpu6050_timer, K_NO_WAIT, K_MSEC(50));
 
     while (1) {
         k_sem_take(&mpu6050_sample_sem, K_FOREVER);
@@ -117,6 +139,12 @@ void mpu6050_thread_entry(void *p1, void *p2, void *p3)
         struct mpu6050_data current_data = {0};
 
         if (mpu6050_read(&current_data) == 0) {
+
+            /* Report recovery after a previous reading error */
+            if (fault_active) {
+                mpu6050_report_fault(false, 0);
+                fault_active = false;
+            }    
 
             /* Calculate attitude using Euler integration */
             roll += current_data.gx * dt;
@@ -135,6 +163,13 @@ void mpu6050_thread_entry(void *p1, void *p2, void *p3)
             k_msgq_put(&sensor_msgq, &msg, K_NO_WAIT);
         } else {
             printk("[Error]: Failed to read MPU6050\n");
+
+
+            /* Report the error only once until recovery */
+            if (!fault_active) {
+                mpu6050_report_fault(true, -1);
+                fault_active = true;
+            }
         }
     }
 }
