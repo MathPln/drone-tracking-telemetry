@@ -61,7 +61,7 @@ static int64_t idle_start_ms = 0;
 static bool sensor_fault_active[4] = {false};
 static int64_t sensor_fault_start[4] = {0};
 
-/* Cached sensor data for periodic printing in TEST mode */
+/* Cached sensor data for periodic reports */
 static struct ldr_data last_ldr;
 static struct imu_message last_imu;
 static struct gps_data last_gps;
@@ -102,6 +102,16 @@ static void test_timer_handler(struct k_timer *timer_id)
     k_msgq_put(&sensor_msgq, &msg, K_NO_WAIT);
 }
 K_TIMER_DEFINE(test_timer, test_timer_handler, NULL);
+
+
+static void normal_timer_handler(struct k_timer *timer_id)
+{
+    struct sensor_message msg = { .type = MSG_TIMER_5S };
+    k_msgq_put(&sensor_msgq, &msg, K_NO_WAIT);
+}
+
+K_TIMER_DEFINE(normal_timer, normal_timer_handler, NULL);
+
 
 /* Detect movement using gyroscope and accelerometer */
 static void update_motion_detection(const struct imu_message *imu)
@@ -152,7 +162,7 @@ static void update_motion_detection(const struct imu_message *imu)
 int main(void)
 {
     printk("[INFO] Main thread started - MSGQ initialized\n");
-    
+
     /* Initialize the statistics module and LEDs */
     statistics_init();
     rgb_init();
@@ -193,19 +203,28 @@ int main(void)
         }
 
         if (k_msgq_get(&sensor_msgq, &msg, timeout) == 0) {
-            
+
             switch (msg.type) {
                 case MSG_BUTTON_PRESSED:
                     /* Mode transition logic: TEST -> NORMAL -> SIMU -> TEST */
                     if (current_mode == MODE_TEST) {
                         current_mode = MODE_NORMAL;
                         k_timer_stop(&test_timer); /* Stop periodic print */
+                        k_timer_start(&normal_timer, K_SECONDS(5), K_SECONDS(5));
                         if (rgb_ready) {
-                            set_color(0, 0, 0); /* Turn off TEST mode LED */
+                            if (current_state == STATE_IDLE) {
+                                set_color(0, 1, 0);
+                            } else if (current_state == STATE_FLYING) {
+                                set_color(1, 1, 0);
+                            } else {
+                                set_color(1, 0, 0);
+                            }
+
                         }
                         statistics_reset();
                         stats_deadline = k_uptime_get() + STATS_PERIOD_MS;
                     } else if (current_mode == MODE_NORMAL) {
+                        k_timer_stop(&normal_timer);
                         current_mode = MODE_SIMU;
                     } else {
                         current_mode = MODE_TEST;
@@ -215,8 +234,8 @@ int main(void)
                         }
                     }
 
-                    printk("[MODE] %s\n", 
-                           current_mode == MODE_TEST ? "TEST" : 
+                    printk("[MODE] %s\n",
+                           current_mode == MODE_TEST ? "TEST" :
                         (current_mode == MODE_NORMAL ? "NORMAL" : "SIMU"));
                     break;
 
@@ -225,15 +244,15 @@ int main(void)
                     if (current_mode == MODE_TEST) {
                         printk("\n--- [TEST MODE] REPORT ---\n");
                         printk("LDR: Brightness: %u%%\n", last_ldr.brightness);
-                        printk("ENV: Temp: %.2f C | Hum: %.2f %%\n", 
+                        printk("ENV: Temp: %.2f C | Hum: %.2f %%\n",
                                (double)last_env.temperature, (double)last_env.humidity);
-                        
-                        printk("IMU: Gyro(deg/s) X=%.2f Y=%.2f Z=%.2f | Accel(m/s2) X=%.2f Y=%.2f Z=%.2f\n", 
+
+                        printk("IMU: Gyro(deg/s) X=%.2f Y=%.2f Z=%.2f | Accel(m/s2) X=%.2f Y=%.2f Z=%.2f\n",
                                (double)last_imu.measurements.gx, (double)last_imu.measurements.gy, (double)last_imu.measurements.gz,
                                (double)last_imu.measurements.ax, (double)last_imu.measurements.ay, (double)last_imu.measurements.az);
-                        
+
                         if (last_gps.fix_valid) {
-                            printk("GPS: Fix OK | UTC: %s | Sats: %u | Lat: %.6f | Lon: %.6f | Alt: %.1f m\n", 
+                            printk("GPS: Fix OK | UTC: %s | Sats: %u | Lat: %.6f | Lon: %.6f | Alt: %.1f m\n",
                                    last_gps.utc, last_gps.satellites, last_gps.latitude, last_gps.longitude, (double)last_gps.altitude);
                         } else {
                             printk("GPS: Waiting for 3D fix...\n");
@@ -242,9 +261,36 @@ int main(void)
                     }
                     break;
 
+                case MSG_TIMER_5S:
+                    if (current_mode == MODE_NORMAL) {
+                        printk("\n--- [NORMAL MODE] REPORT ---\n");
+
+                        printk("LDR: Brightness: %u%%\n", last_ldr.brightness);
+                        printk("ENV: Temp: %.2f C | Hum: %.2f %%\n",
+                                (double)last_env.temperature, (double)last_env.humidity);
+
+                        printk("IMU: Gyro(deg/s) X=%.2f Y=%.2f Z=%.2f | Accel(m/s2) X=%.2f Y=%.2f Z=%.2f\n",
+                                (double)last_imu.measurements.gx, (double)last_imu.measurements.gy, (double)last_imu.measurements.gz,
+                                (double)last_imu.measurements.ax, (double)last_imu.measurements.ay, (double)last_imu.measurements.az);
+
+                        if (last_gps.fix_valid) {
+                            printk("GPS: Fix OK | UTC: %s | Sats: %u | Lat: %.6f | Lon: %.6f | Alt: %.1f m\n",
+                                last_gps.utc, last_gps.satellites, last_gps.latitude, last_gps.longitude, (double)last_gps.altitude);
+                        } else {
+                        printk("GPS: Waiting for 3D fix...\n");
+                        }
+
+                        printk("Tracker state: %s\n",
+                                current_state == STATE_IDLE ? "IDLE" :
+                                current_state == STATE_FLYING ? "FLYING" : "PROBLEM");
+
+                        printk("-------------------------------\n");
+                    }
+                    break;
+
                 case MSG_SENSOR_LDR:
                     last_ldr = msg.data.ldr;
-                    
+
                     if (current_mode == MODE_NORMAL) {
                         statistics_add_light(msg.data.ldr.brightness);
                     }
@@ -271,7 +317,7 @@ int main(void)
 
                 case MSG_SENSOR_ENV:
                     last_env = msg.data.env;
-                    
+
                     if (current_mode == MODE_NORMAL) {
                         statistics_add_environment(
                             msg.data.env.temperature,
@@ -325,17 +371,26 @@ int main(void)
         /* Update tracker state */
         if (next_state != current_state) {
             current_state = next_state;
-            switch (current_state) {
-                case STATE_IDLE:    
-                    printk("[STATE] IDLE\n"); 
-                    break;
-                case STATE_FLYING:  
-                    printk("[STATE] FLYING\n"); 
-                    break;
-                case STATE_PROBLEM: 
-                    printk("[STATE] PROBLEM\n"); 
-                    break;
+
+            if (current_mode == MODE_NORMAL && rgb_ready) {
+                switch (current_state) {
+                    case STATE_IDLE:
+                        set_color(0, 1, 0);  /* Green */
+                        break;
+
+                    case STATE_FLYING:
+                        set_color(1, 1, 0);  /* Yellow */
+                        break;
+
+                    case STATE_PROBLEM:
+                        set_color(1, 0, 0);  /* Red */
+                        break;
+                }
             }
+
+            printk("[STATE] %s\n",
+                current_state == STATE_IDLE ? "IDLE" :
+                current_state == STATE_FLYING ? "FLYING" : "PROBLEM");
         }
 
         /* Print and reset statistics every 30 seconds in NORMAL mode */
@@ -343,7 +398,7 @@ int main(void)
             statistics_print();
             statistics_reset();
             stats_deadline = k_uptime_get() + STATS_PERIOD_MS;
-        }   
+        }
     }
     return 0;
 }
