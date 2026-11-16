@@ -18,23 +18,20 @@ package "Zephyr RTOS Application" #FAFAFA {
     folder "Acquisition threads (Producers)" #E8F5E9 {
         [ldr_sensor.c] as ldr_thread #A5D6A7
         [temp_hum_sensor.c] as temp_hum_thread #A5D6A7
-        [imu_sensor.c] as imu_thread #A5D6A7
+        [mpu_sensor.c] as imu_thread #A5D6A7
         [gps_sensor.c] as gps_thread #A5D6A7
     }
 
-    folder "Communication (message queues)" #FFF8E1 {
-        queue "ldr_msgq" as q_ldr #FFE082
-        queue "env_msgq" as q_env #FFE082
-        queue "imu_msgq" as q_imu #FFE082
-        queue "gps_msgq" as q_gps #FFE082
+    folder "Communication (Centralized)" #FFF8E1 {
+        queue "sensor_msgq\n(struct sensor_message)" as q_central #FFE082
     }
 
-    folder "Core & telemetry (Consumers)" #E3F2FD {
-        [main.c\n(FSM & Stats)] as main_thread #90CAF9
+    folder "Core & Telemetry (Consumer)" #E3F2FD {
+        [main.c\n(FSM, Cache & Timers)] as main_thread #90CAF9
         
-        database "Telemetry struct\n(mutex)" as global_state #FFCC80
-        
-        [simu_telemetry.c] as simu_thread #90CAF9
+        [simu_protocol.c] as simu_protocol #90CAF9
+        [statistics.c] as stats_module #90CAF9
+        [rgb_led.c] as led_driver #90CAF9
     }
 }
 
@@ -47,25 +44,25 @@ hw_imu <--> imu_thread : I2C
 hw_gps --> gps_thread : UART (NMEA)
 hw_btn --> main_thread : GPIO Interrupt
 
-' Threads to Queues
-ldr_thread --> q_ldr : Light %
-temp_hum_thread --> q_env : Temp & hum
-imu_thread --> q_imu : Accel, Gyro, Attitude
-gps_thread --> q_gps : Lat, Lon, Alt, Fix
+' Threads to Central Queue
+ldr_thread --> q_central : MSG_SENSOR_LDR / FAULT
+temp_hum_thread --> q_central : MSG_SENSOR_ENV / FAULT
+imu_thread --> q_central : MSG_SENSOR_MPU / FAULT
+gps_thread --> q_central : MSG_SENSOR_GPS / FAULT
 
-' Queues to Core (Only main consumes)
-q_ldr --> main_thread
-q_env --> main_thread
-q_imu --> main_thread
-q_gps --> main_thread
+' Timers inside Main Thread pushing to Queue
+main_thread --> q_central : MSG_TIMER_TEST / NORMAL / SIMU
 
-' Core to State to Simu
-main_thread -l-> global_state : Updates state
-global_state <-d- simu_thread : Reads data at 10Hz
+' Queue to Main Thread
+q_central --> main_thread : Reads all messages
+
+' Core Logic to Helpers
+main_thread --> simu_protocol : Calls simu_build_frame()
+main_thread --> stats_module : Updates & Prints stats
+main_thread --> led_driver : Controls colors based on state
 
 ' Core to Outputs
-main_thread --> hw_led : GPIO (State Color)
-simu_thread --> com_port : UART (SIMU)
-main_thread --> com_port : UART (TEST/NORMAL Logs)
+led_driver --> hw_led : GPIO
+main_thread --> com_port : UART (TEST/NORMAL/SIMU logs)
 
 @enduml
