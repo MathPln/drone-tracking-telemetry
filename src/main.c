@@ -170,76 +170,6 @@ static void update_motion_detection(const struct imu_message *imu)
     }
 }
 
-
-/* Temporary test of SIMU frame generation */
-static void test_simu_protocol(void)
-{
-    static struct simu_data test_data = {
-        .sequence = 1,
-
-        .gps = {
-            .latitude = 48.856613,
-            .longitude = 2.352222,
-            .altitude = 35.5f,
-            .satellites = 8,
-            .fix_valid = true
-        },
-
-        .imu = {
-            .measurements = {
-                .ax = 0.12f,
-                .ay = 0.25f,
-                .az = 9.81f,
-                .gx = 1.2f,
-                .gy = 2.3f,
-                .gz = 0.5f
-            },
-            .roll = 1.25f,
-            .pitch = -2.50f,
-            .yaw = 45.75f
-        },
-
-        .ldr = {
-            .brightness = 75
-        },
-
-        .env = {
-            .temperature = 22.5f,
-            .humidity = 60.0f
-        },
-
-        .x = 12.34f,
-        .y = -5.67f,
-        .z = 10.25f,
-
-        .vx = 1.25f,
-        .vy = -0.50f,
-        .vz = 0.75f,
-
-        .state = "IDLE",
-        .flags = 0x0000
-    };
-
-    static char frame[SIMU_FRAME_BUFFER_SIZE];
-
-    test_data.timestamp_ms = (uint64_t)k_uptime_get();
-
-    int ret = simu_build_frame(&test_data, frame, sizeof(frame));
-
-    if (ret == 0) {
-        printk("\n[SIMU TEST] Frame generated successfully\n");
-        printk("[SIMU TEST] Length: %u characters\n",
-               (unsigned int)strlen(frame));
-        printk("%s", frame);
-    } else {
-        printk("[SIMU TEST] Frame generation failed: %d\n", ret);
-    }
-}
-
-
-
-
-
 int main(void)
 {
     printk("[INFO] Main thread started - MSGQ initialized\n");
@@ -247,9 +177,6 @@ int main(void)
     /* Initialize the statistics module and LEDs */
     statistics_init();
     rgb_init();
-
-    test_simu_protocol();
-
 
     /* Initialize B1 button GPIO */
     if (gpio_is_ready_dt(&button)) {
