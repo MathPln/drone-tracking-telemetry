@@ -6,6 +6,9 @@
 #include "sensor_messages.h"
 #include "statistics.h"
 
+#include "simu_protocol.h"
+#include <string.h>
+
 /* Central message queue definition */
 K_MSGQ_DEFINE(sensor_msgq, sizeof(struct sensor_message), 10, 4);
 
@@ -98,7 +101,7 @@ static void button_pressed(const struct device *dev, struct gpio_callback *cb, g
 /* Timer for 2-second periodic report in TEST mode */
 static void test_timer_handler(struct k_timer *timer_id)
 {
-    struct sensor_message msg = { .type = MSG_TIMER_2S };
+    struct sensor_message msg = { .type = MSG_TIMER_TEST };
     k_msgq_put(&sensor_msgq, &msg, K_NO_WAIT);
 }
 K_TIMER_DEFINE(test_timer, test_timer_handler, NULL);
@@ -106,12 +109,20 @@ K_TIMER_DEFINE(test_timer, test_timer_handler, NULL);
 
 static void normal_timer_handler(struct k_timer *timer_id)
 {
-    struct sensor_message msg = { .type = MSG_TIMER_5S };
+    struct sensor_message msg = { .type = MSG_TIMER_NORMAL };
     k_msgq_put(&sensor_msgq, &msg, K_NO_WAIT);
 }
 
 K_TIMER_DEFINE(normal_timer, normal_timer_handler, NULL);
 
+/* Timer for 10Hz (100ms) cadencing in SIMU mode */
+static void simu_timer_handler(struct k_timer *timer_id)
+{
+    struct sensor_message msg = { .type = MSG_TIMER_SIMU };
+    k_msgq_put(&sensor_msgq, &msg, K_NO_WAIT);
+}
+
+K_TIMER_DEFINE(simu_timer, simu_timer_handler, NULL);
 
 /* Detect movement using gyroscope and accelerometer */
 static void update_motion_detection(const struct imu_message *imu)
@@ -159,6 +170,76 @@ static void update_motion_detection(const struct imu_message *imu)
     }
 }
 
+
+/* Temporary test of SIMU frame generation */
+static void test_simu_protocol(void)
+{
+    static struct simu_data test_data = {
+        .sequence = 1,
+
+        .gps = {
+            .latitude = 48.856613,
+            .longitude = 2.352222,
+            .altitude = 35.5f,
+            .satellites = 8,
+            .fix_valid = true
+        },
+
+        .imu = {
+            .measurements = {
+                .ax = 0.12f,
+                .ay = 0.25f,
+                .az = 9.81f,
+                .gx = 1.2f,
+                .gy = 2.3f,
+                .gz = 0.5f
+            },
+            .roll = 1.25f,
+            .pitch = -2.50f,
+            .yaw = 45.75f
+        },
+
+        .ldr = {
+            .brightness = 75
+        },
+
+        .env = {
+            .temperature = 22.5f,
+            .humidity = 60.0f
+        },
+
+        .x = 12.34f,
+        .y = -5.67f,
+        .z = 10.25f,
+
+        .vx = 1.25f,
+        .vy = -0.50f,
+        .vz = 0.75f,
+
+        .state = "IDLE",
+        .flags = 0x0000
+    };
+
+    static char frame[SIMU_FRAME_BUFFER_SIZE];
+
+    test_data.timestamp_ms = (uint64_t)k_uptime_get();
+
+    int ret = simu_build_frame(&test_data, frame, sizeof(frame));
+
+    if (ret == 0) {
+        printk("\n[SIMU TEST] Frame generated successfully\n");
+        printk("[SIMU TEST] Length: %u characters\n",
+               (unsigned int)strlen(frame));
+        printk("%s", frame);
+    } else {
+        printk("[SIMU TEST] Frame generation failed: %d\n", ret);
+    }
+}
+
+
+
+
+
 int main(void)
 {
     printk("[INFO] Main thread started - MSGQ initialized\n");
@@ -166,6 +247,9 @@ int main(void)
     /* Initialize the statistics module and LEDs */
     statistics_init();
     rgb_init();
+
+    test_simu_protocol();
+
 
     /* Initialize B1 button GPIO */
     if (gpio_is_ready_dt(&button)) {
@@ -226,7 +310,11 @@ int main(void)
                     } else if (current_mode == MODE_NORMAL) {
                         k_timer_stop(&normal_timer);
                         current_mode = MODE_SIMU;
+
+                        /* Start SIMU timer at 10Hz */
+                        k_timer_start(&simu_timer, K_MSEC(100), K_MSEC(100));
                     } else {
+                        k_timer_stop(&simu_timer);
                         current_mode = MODE_TEST;
                         k_timer_start(&test_timer, K_SECONDS(2), K_SECONDS(2)); /* Restart periodic print */
                         if (rgb_ready) {
@@ -239,7 +327,7 @@ int main(void)
                         (current_mode == MODE_NORMAL ? "NORMAL" : "SIMU"));
                     break;
 
-                case MSG_TIMER_2S:
+                case MSG_TIMER_TEST:
                     /* Periodic report output triggered by the timer */
                     if (current_mode == MODE_TEST) {
                         printk("\n--- [TEST MODE] REPORT ---\n");
@@ -261,7 +349,7 @@ int main(void)
                     }
                     break;
 
-                case MSG_TIMER_5S:
+                case MSG_TIMER_NORMAL:
                     if (current_mode == MODE_NORMAL) {
                         printk("\n--- [NORMAL MODE] REPORT ---\n");
 
@@ -287,6 +375,53 @@ int main(void)
                         printk("-------------------------------\n");
                     }
                     break;
+
+                
+
+                case MSG_TIMER_SIMU: {
+                    if (current_mode == MODE_SIMU) {
+
+                        static uint16_t sequence = 0;
+                        static struct simu_data simu_frame_data;
+                        static char frame[SIMU_FRAME_BUFFER_SIZE];
+
+                        simu_frame_data.sequence = sequence++;
+                        simu_frame_data.timestamp_ms = (uint64_t)k_uptime_get();
+
+                        /* Latest sensor measurements */
+                        simu_frame_data.gps = last_gps;
+                        simu_frame_data.imu = last_imu;
+                        simu_frame_data.ldr = last_ldr;
+                        simu_frame_data.env = last_env;
+
+                        /* Position and velocity not estimated yet */
+                        simu_frame_data.x = 0.0f;
+                        simu_frame_data.y = 0.0f;
+                        simu_frame_data.z = 0.0f;
+                        simu_frame_data.vx = 0.0f;
+                        simu_frame_data.vy = 0.0f;
+                        simu_frame_data.vz = 0.0f;
+
+                        /* Tracker state */
+                        simu_frame_data.state =
+                            current_state == STATE_IDLE ? "IDLE" :
+                            current_state == STATE_FLYING ? "FLYING" : "PROBLEM";
+
+                        /* GPS validity flag */
+                        simu_frame_data.flags =
+                            last_gps.fix_valid ? 0x0000 : 0x0002;
+
+                        /* Build and transmit frame */
+                        if (simu_build_frame(&simu_frame_data, frame,
+                                             sizeof(frame)) == 0) {
+                            printk("%s", frame);
+                        }
+                    }
+                    break;
+                }
+
+                    
+
 
                 case MSG_SENSOR_LDR:
                     last_ldr = msg.data.ldr;
