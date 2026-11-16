@@ -14,7 +14,9 @@ enum message_type {
     MSG_SENSOR_GPS,
     MSG_SENSOR_ENV,
     MSG_BUTTON_PRESSED,
-    MSG_TIMER_2S,
+    MSG_TIMER_TEST,
+    MSG_TIMER_NORMAL,
+    MSG_TIMER_SIMU,
     MSG_SENSOR_FAULT
 };
 
