@@ -32,6 +32,46 @@ static void gps_report_fault(bool active, int error_code)
 
 #define NMEA_BUFFER_SIZE 128
 
+static int nmea_hex_value(char value)
+{
+    if (value >= '0' && value <= '9') {
+        return value - '0';
+    }
+    if (value >= 'A' && value <= 'F') {
+        return value - 'A' + 10;
+    }
+    if (value >= 'a' && value <= 'f') {
+        return value - 'a' + 10;
+    }
+    return -1;
+}
+
+static bool nmea_checksum_valid(const char *sentence)
+{
+    if (sentence == NULL || sentence[0] != '$') {
+        return false;
+    }
+
+    const char *checksum = strchr(sentence, '*');
+    if (checksum == NULL || checksum[1] == '\0' ||
+        checksum[2] == '\0' || checksum[3] != '\0') {
+        return false;
+    }
+
+    int high = nmea_hex_value(checksum[1]);
+    int low = nmea_hex_value(checksum[2]);
+    if (high < 0 || low < 0) {
+        return false;
+    }
+
+    uint8_t calculated = 0;
+    for (const char *character = sentence + 1; character < checksum; character++) {
+        calculated ^= (uint8_t)*character;
+    }
+
+    return calculated == (uint8_t)((high << 4) | low);
+}
+
 /* Convert NMEA coordinates (DDMM.MMMM) to standard decimal degrees */
 static double convert_nmea_to_decimal(double nmea_val, char direction)
 {
@@ -70,8 +110,9 @@ void gps_thread_entry(void *p1, void *p2, void *p3)
                 //     printk("[GPS RAW]: %s\n", nmea_buffer);
                 // }
 
-                /* Filter for GPGGA sentences (fix data) */
-                if (strncmp(nmea_buffer, "$GPGGA", 6) == 0) {
+                /* Filter valid GPGGA sentences (fix data) */
+                if (nmea_checksum_valid(nmea_buffer) &&
+                    strncmp(nmea_buffer, "$GPGGA", 6) == 0) {
                     char time_str[16], lat_dir, lon_dir, fix_quality_str[4];
                     float raw_lat = 0.0f, raw_lon = 0.0f, altitude = 0.0f;
                     int fix_quality = 0, satellites = 0;
