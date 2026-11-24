@@ -3,6 +3,7 @@
 #include <zephyr/drivers/gpio.h>
 #include <zephyr/devicetree.h>
 #include <math.h>
+#include "rgb_led.h"
 #include "sensor_messages.h"
 #include "statistics.h"
 
@@ -12,24 +13,13 @@
 /* Central message queue definition */
 K_MSGQ_DEFINE(sensor_msgq, sizeof(struct sensor_message), 10, 4);
 
-/* B1 button and RGB LED configuration */
+/* B1 button configuration */
 static const struct gpio_dt_spec button = GPIO_DT_SPEC_GET(DT_ALIAS(sw0), gpios);
-static const struct gpio_dt_spec led_red = GPIO_DT_SPEC_GET(DT_ALIAS(led_red), gpios);
-static const struct gpio_dt_spec led_green = GPIO_DT_SPEC_GET(DT_ALIAS(led_green), gpios);
-static const struct gpio_dt_spec led_blue = GPIO_DT_SPEC_GET(DT_ALIAS(led_blue), gpios);
 
 static struct gpio_callback button_cb;
 static bool rgb_ready;
 
 static volatile enum tracker_mode report_timer_mode = MODE_TEST;
-/* Set RGB color using logical GPIO states */
-static void set_color(int red, int green, int blue)
-{
-    gpio_pin_set_dt(&led_red, red);
-    gpio_pin_set_dt(&led_green, green);
-    gpio_pin_set_dt(&led_blue, blue);
-}
-
 /* Operating modes selected with button B1 */
 static enum tracker_mode current_mode = MODE_TEST;
 
@@ -69,19 +59,6 @@ static struct ldr_data last_ldr;
 static struct imu_message last_imu;
 static struct gps_data last_gps;
 static struct env_data last_env;
-
-/* Initialize RGB LED */
-static void rgb_init(void)
-{
-    if (gpio_is_ready_dt(&led_red) && gpio_is_ready_dt(&led_green) && gpio_is_ready_dt(&led_blue)) {
-        gpio_pin_configure_dt(&led_red, GPIO_OUTPUT_INACTIVE);
-        gpio_pin_configure_dt(&led_green, GPIO_OUTPUT_INACTIVE);
-        gpio_pin_configure_dt(&led_blue, GPIO_OUTPUT_INACTIVE);
-        rgb_ready = true;
-    } else {
-        printk("[ERROR] RGB LED not ready\n");
-    }
-}
 
 /* Button interrupt callback */
 static void button_pressed(const struct device *dev, struct gpio_callback *cb, gpio_port_pins_t pins)
@@ -167,7 +144,12 @@ int main(void)
 
     /* Initialize the statistics module and LEDs */
     statistics_init();
-    rgb_init();
+    int rgb_error = rgb_led_init();
+    if (rgb_error < 0) {
+        printk("[ERROR] RGB LED initialization failed: %d\n", rgb_error);
+    } else {
+        rgb_ready = true;
+    }
 
     /* Initialize B1 button GPIO */
     if (gpio_is_ready_dt(&button)) {
@@ -182,7 +164,7 @@ int main(void)
     /* Start the 2-second report timer and turn on blue LED for TEST mode */
     report_timer_start(K_SECONDS(2));
     if (rgb_ready) {
-        set_color(0, 0, 1);
+        rgb_led_set(0, 0, 1);
     }
 
     struct sensor_message msg;
@@ -214,11 +196,11 @@ int main(void)
                         report_timer_start(K_SECONDS(5));
                         if (rgb_ready) {
                             if (current_state == STATE_IDLE) {
-                                set_color(0, 1, 0);
+                                rgb_led_set(0, 1, 0);
                             } else if (current_state == STATE_FLYING) {
-                                set_color(1, 1, 0);
+                                rgb_led_set(1, 1, 0);
                             } else {
-                                set_color(1, 0, 0);
+                                rgb_led_set(1, 0, 0);
                             }
 
                         }
@@ -226,14 +208,14 @@ int main(void)
                         stats_deadline = k_uptime_get() + STATS_PERIOD_MS;
                     } else if (current_mode == MODE_NORMAL) {
                         current_mode = MODE_SIMU;
-
+                        rgb_led_set(1, 1, 1);
                         /* Start SIMU timer at 10Hz */
                         report_timer_start(K_MSEC(100));
                     } else {
                         current_mode = MODE_TEST;
                         report_timer_start(K_SECONDS(2));
                         if (rgb_ready) {
-                            set_color(0, 0, 1); /* Turn on TEST mode LED */
+                            rgb_led_set(0, 0, 1); /* Turn on TEST mode LED */
                         }
                     }
 
@@ -417,15 +399,15 @@ int main(void)
             if (current_mode == MODE_NORMAL && rgb_ready) {
                 switch (current_state) {
                     case STATE_IDLE:
-                        set_color(0, 1, 0);  /* Green */
+                        rgb_led_set(0, 1, 0);  /* Green */
                         break;
 
                     case STATE_FLYING:
-                        set_color(1, 1, 0);  /* Yellow */
+                        rgb_led_set(1, 1, 0);  /* Yellow */
                         break;
 
                     case STATE_PROBLEM:
-                        set_color(1, 0, 0);  /* Red */
+                        rgb_led_set(1, 0, 0);  /* Red */
                         break;
                 }
             }
