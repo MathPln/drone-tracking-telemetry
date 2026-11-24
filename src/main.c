@@ -21,6 +21,7 @@ static const struct gpio_dt_spec led_blue = GPIO_DT_SPEC_GET(DT_ALIAS(led_blue),
 static struct gpio_callback button_cb;
 static bool rgb_ready;
 
+static volatile enum tracker_mode report_timer_mode = MODE_TEST;
 /* Set RGB color using logical GPIO states */
 static void set_color(int red, int green, int blue)
 {
@@ -30,7 +31,6 @@ static void set_color(int red, int green, int blue)
 }
 
 /* Operating modes selected with button B1 */
-enum tracker_mode { MODE_TEST, MODE_NORMAL, MODE_SIMU };
 static enum tracker_mode current_mode = MODE_TEST;
 
 /* Tracker states managed by the central state machine */
@@ -98,31 +98,22 @@ static void button_pressed(const struct device *dev, struct gpio_callback *cb, g
     k_msgq_put(&sensor_msgq, &msg, K_NO_WAIT);
 }
 
-/* Timer for 2-second periodic report in TEST mode */
-static void test_timer_handler(struct k_timer *timer_id)
+/* One timer drives the active mode's periodic output. */
+static void report_timer_handler(struct k_timer *timer_id)
 {
-    struct sensor_message msg = { .type = MSG_TIMER_TEST };
+    struct sensor_message msg = {
+        .type = MSG_TIMER_REPORT,
+        .data.timer_mode = report_timer_mode
+    };
     k_msgq_put(&sensor_msgq, &msg, K_NO_WAIT);
 }
-K_TIMER_DEFINE(test_timer, test_timer_handler, NULL);
+K_TIMER_DEFINE(report_timer, report_timer_handler, NULL);
 
-
-static void normal_timer_handler(struct k_timer *timer_id)
+static void report_timer_start(k_timeout_t period)
 {
-    struct sensor_message msg = { .type = MSG_TIMER_NORMAL };
-    k_msgq_put(&sensor_msgq, &msg, K_NO_WAIT);
+    report_timer_mode = current_mode;
+    k_timer_start(&report_timer, period, period);
 }
-
-K_TIMER_DEFINE(normal_timer, normal_timer_handler, NULL);
-
-/* Timer for 10Hz (100ms) cadencing in SIMU mode */
-static void simu_timer_handler(struct k_timer *timer_id)
-{
-    struct sensor_message msg = { .type = MSG_TIMER_SIMU };
-    k_msgq_put(&sensor_msgq, &msg, K_NO_WAIT);
-}
-
-K_TIMER_DEFINE(simu_timer, simu_timer_handler, NULL);
 
 /* Detect movement using gyroscope and accelerometer */
 static void update_motion_detection(const struct imu_message *imu)
@@ -188,8 +179,8 @@ int main(void)
 
     printk("[MODE] TEST\n");
 
-    /* Start the 2-second timer and turn on blue LED for TEST mode */
-    k_timer_start(&test_timer, K_SECONDS(2), K_SECONDS(2));
+    /* Start the 2-second report timer and turn on blue LED for TEST mode */
+    report_timer_start(K_SECONDS(2));
     if (rgb_ready) {
         set_color(0, 0, 1);
     }
@@ -220,8 +211,7 @@ int main(void)
                     /* Mode transition logic: TEST -> NORMAL -> SIMU -> TEST */
                     if (current_mode == MODE_TEST) {
                         current_mode = MODE_NORMAL;
-                        k_timer_stop(&test_timer); /* Stop periodic print */
-                        k_timer_start(&normal_timer, K_SECONDS(5), K_SECONDS(5));
+                        report_timer_start(K_SECONDS(5));
                         if (rgb_ready) {
                             if (current_state == STATE_IDLE) {
                                 set_color(0, 1, 0);
@@ -235,15 +225,13 @@ int main(void)
                         statistics_reset();
                         stats_deadline = k_uptime_get() + STATS_PERIOD_MS;
                     } else if (current_mode == MODE_NORMAL) {
-                        k_timer_stop(&normal_timer);
                         current_mode = MODE_SIMU;
 
                         /* Start SIMU timer at 10Hz */
-                        k_timer_start(&simu_timer, K_MSEC(100), K_MSEC(100));
+                        report_timer_start(K_MSEC(100));
                     } else {
-                        k_timer_stop(&simu_timer);
                         current_mode = MODE_TEST;
-                        k_timer_start(&test_timer, K_SECONDS(2), K_SECONDS(2)); /* Restart periodic print */
+                        report_timer_start(K_SECONDS(2));
                         if (rgb_ready) {
                             set_color(0, 0, 1); /* Turn on TEST mode LED */
                         }
@@ -254,8 +242,11 @@ int main(void)
                         (current_mode == MODE_NORMAL ? "NORMAL" : "SIMU"));
                     break;
 
-                case MSG_TIMER_TEST:
-                    /* Periodic report output triggered by the timer */
+                case MSG_TIMER_REPORT: {
+                    if (msg.data.timer_mode != current_mode) {
+                        break;
+                    }
+
                     if (current_mode == MODE_TEST) {
                         printk("\n--- [TEST MODE] REPORT ---\n");
                         printk("LDR: Brightness: %u%%\n", last_ldr.brightness);
@@ -273,11 +264,7 @@ int main(void)
                             printk("GPS: Waiting for 3D fix...\n");
                         }
                         printk("-------------------------------\n");
-                    }
-                    break;
-
-                case MSG_TIMER_NORMAL:
-                    if (current_mode == MODE_NORMAL) {
+                    } else if (current_mode == MODE_NORMAL) {
                         printk("\n--- [NORMAL MODE] REPORT ---\n");
 
                         printk("LDR: Brightness: %u%%\n", last_ldr.brightness);
@@ -300,14 +287,7 @@ int main(void)
                                 current_state == STATE_FLYING ? "FLYING" : "PROBLEM");
 
                         printk("-------------------------------\n");
-                    }
-                    break;
-
-                
-
-                case MSG_TIMER_SIMU: {
-                    if (current_mode == MODE_SIMU) {
-
+                    } else {
                         static uint16_t sequence = 0;
                         static struct simu_data simu_frame_data;
                         static char frame[SIMU_FRAME_BUFFER_SIZE];

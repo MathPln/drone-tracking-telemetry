@@ -14,10 +14,14 @@ enum message_type {
     MSG_SENSOR_GPS,
     MSG_SENSOR_ENV,
     MSG_BUTTON_PRESSED,
-    MSG_TIMER_TEST,
-    MSG_TIMER_NORMAL,
-    MSG_TIMER_SIMU,
+    MSG_TIMER_REPORT,
     MSG_SENSOR_FAULT
+};
+
+enum tracker_mode {
+    MODE_TEST,
+    MODE_NORMAL,
+    MODE_SIMU
 };
 
 enum sensor_id {
@@ -41,6 +45,7 @@ struct sensor_message {
         struct gps_data gps;
         struct env_data env;
         struct sensor_fault fault;
+        enum tracker_mode timer_mode;
     } data;
 };
 
