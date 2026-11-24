@@ -206,7 +206,9 @@ int main(void)
                         stats_deadline = k_uptime_get() + STATS_PERIOD_MS;
                     } else if (current_mode == MODE_NORMAL) {
                         current_mode = MODE_SIMU;
-                        rgb_led_set(1, 1, 1);
+                        if (rgb_ready) {
+                            rgb_led_set(1, 1, 1);
+                        }
                         /* Start SIMU timer at 10Hz */
                         report_timer_start(K_MSEC(100));
                     } else {
