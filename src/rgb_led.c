@@ -25,10 +25,22 @@ int rgb_led_init(void)
         !gpio_is_ready_dt(&led_blue)) {
         return -ENODEV;
     }
+
     /* Configure RGB pins as inactive outputs */
-    gpio_pin_configure_dt(&led_red, GPIO_OUTPUT_INACTIVE);
-    gpio_pin_configure_dt(&led_green, GPIO_OUTPUT_INACTIVE);
-    gpio_pin_configure_dt(&led_blue, GPIO_OUTPUT_INACTIVE);
+    int err = gpio_pin_configure_dt(&led_red, GPIO_OUTPUT_INACTIVE);
+    if (err < 0) {
+        return err;
+    }
+
+    err = gpio_pin_configure_dt(&led_green, GPIO_OUTPUT_INACTIVE);
+    if (err < 0) {
+        return err;
+    }
+
+    err = gpio_pin_configure_dt(&led_blue, GPIO_OUTPUT_INACTIVE);
+    if (err < 0) {
+        return err;
+    }
 
     return 0;
 }

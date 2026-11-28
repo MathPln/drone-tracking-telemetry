@@ -8,7 +8,7 @@
 #include "sensor_messages.h"
 #include "statistics.h"
 #include "motion_estimator.h"
-#include "simu_protocol.h"
+#include "telemetry_report.h"
 
 /* Central message queue definition */
 K_MSGQ_DEFINE(sensor_msgq, sizeof(struct sensor_message), 10, 4);
@@ -165,33 +165,7 @@ static void update_motion_detection(const struct imu_message *imu)
     }
 }
 
-static float clampf(float val, float min_val, float max_val)
-{
-    if (isnan(val) || isinf(val)) {
-        return 0.0f;
-    }
-    if (val < min_val) {
-        return min_val;
-    }
-    if (val > max_val) {
-        return max_val;
-    }
-    return val;
-}
 
-static float wrap_angle_deg(float angle)
-{
-    if (isnan(angle) || isinf(angle)) {
-        return 0.0f;
-    }
-    while (angle > 180.0f) {
-        angle -= 360.0f;
-    }
-    while (angle < -180.0f) {
-        angle += 360.0f;
-    }
-    return angle;
-}
 
 static uint16_t build_simu_flags(void)
 {
@@ -311,95 +285,21 @@ int main(void)
                         break;
                     }
 
-                    if (current_mode == MODE_TEST) {
-                        printk("\n--- [TEST MODE] REPORT ---\n");
-                        printk("LDR: Brightness: %u%%\n", last_ldr.brightness);
-                        printk("ENV: Temp: %.2f C | Hum: %.2f %%\n",
-                               (double)last_env.temperature, (double)last_env.humidity);
-                        printk("IMU: Gyro(deg/s) X=%.2f Y=%.2f Z=%.2f | Accel(m/s2) X=%.2f Y=%.2f Z=%.2f\n",
-                               (double)last_imu.measurements.gx, (double)last_imu.measurements.gy, (double)last_imu.measurements.gz,
-                               (double)last_imu.measurements.ax, (double)last_imu.measurements.ay, (double)last_imu.measurements.az);
-                        printk("Attitude(deg): Roll=%.2f | Pitch=%.2f | Yaw=%.2f\n",
-                               (double)last_imu.roll,
-                               (double)last_imu.pitch,
-                               (double)last_imu.yaw);
-                        printk("World Accel(m/s2): X=%.2f Y=%.2f Z=%.2f\n",
-                               (double)last_motion_estimate.ax,
-                               (double)last_motion_estimate.ay,
-                               (double)last_motion_estimate.az);
-                        printk("Velocity(m/s): X=%.3f Y=%.3f Z=%.3f\n",
-                               (double)last_motion_estimate.vx,
-                               (double)last_motion_estimate.vy,
-                               (double)last_motion_estimate.vz);
-                        printk("Position(m): X=%.3f Y=%.3f Z=%.3f\n",
-                               (double)last_motion_estimate.x,
-                               (double)last_motion_estimate.y,
-                               (double)last_motion_estimate.z);
-
-                        if (last_gps.fix_valid) {
-                            printk("GPS: Fix OK | UTC: %s | Sats: %u | Lat: %.6f | Lon: %.6f | Alt: %.1f m\n",
-                                   last_gps.utc, last_gps.satellites, last_gps.latitude, last_gps.longitude, (double)last_gps.altitude);
-                        } else {
-                            printk("GPS: Waiting for 3D fix...\n");
-                        }
-                        printk("-------------------------------\n");
-                    } else if (current_mode == MODE_NORMAL) {
-                        printk("\n--- [NORMAL MODE] REPORT ---\n");
-                        printk("LDR: Brightness: %u%%\n", last_ldr.brightness);
-                        printk("ENV: Temp: %.2f C | Hum: %.2f %%\n",
-                               (double)last_env.temperature, (double)last_env.humidity);
-                        printk("IMU: Gyro(deg/s) X=%.2f Y=%.2f Z=%.2f | Accel(m/s2) X=%.2f Y=%.2f Z=%.2f\n",
-                               (double)last_imu.measurements.gx, (double)last_imu.measurements.gy, (double)last_imu.measurements.gz,
-                               (double)last_imu.measurements.ax, (double)last_imu.measurements.ay, (double)last_imu.measurements.az);
-
-                        if (last_gps.fix_valid) {
-                            printk("GPS: Fix OK | UTC: %s | Sats: %u | Lat: %.6f | Lon: %.6f | Alt: %.1f m\n",
-                                   last_gps.utc, last_gps.satellites, last_gps.latitude, last_gps.longitude, (double)last_gps.altitude);
-                        } else {
-                            printk("GPS: Waiting for 3D fix...\n");
-                        }
-
-                        printk("Tracker state: %s\n",
-                               current_state == STATE_IDLE ? "IDLE" :
-                               current_state == STATE_FLYING ? "FLYING" : "PROBLEM");
-                        printk("-------------------------------\n");
-                    } else {
-                        static uint16_t sequence = 0;
-                        static struct simu_data simu_frame_data;
-                        static char frame[SIMU_FRAME_BUFFER_SIZE];
-
-                        simu_frame_data.sequence = sequence++;
-                        simu_frame_data.timestamp_ms = (uint64_t)k_uptime_get();
-
-                        /* Latest sensor measurements */
-                        simu_frame_data.gps = last_gps;
-                        simu_frame_data.imu = last_imu;
-                        simu_frame_data.imu.roll  = wrap_angle_deg(last_imu.roll);
-                        simu_frame_data.imu.pitch = wrap_angle_deg(last_imu.pitch);
-                        simu_frame_data.imu.yaw   = wrap_angle_deg(last_imu.yaw);
-                        simu_frame_data.ldr = last_ldr;
-                        simu_frame_data.env = last_env;
-
-                        /* Estimated local position and velocity */
-                        simu_frame_data.x  = clampf(last_motion_estimate.x,  -9999.99f, 9999.99f);
-                        simu_frame_data.y  = clampf(last_motion_estimate.y,  -9999.99f, 9999.99f);
-                        simu_frame_data.z  = clampf(last_motion_estimate.z,  -9999.99f, 9999.99f);
-                        simu_frame_data.vx = clampf(last_motion_estimate.vx,  -9999.99f, 9999.99f);
-                        simu_frame_data.vy = clampf(last_motion_estimate.vy,  -9999.99f, 9999.99f);
-                        simu_frame_data.vz = clampf(last_motion_estimate.vz,  -9999.99f, 9999.99f);
-
-                        /* Tracker state */
-                        simu_frame_data.state =
+                    struct telemetry_data data = {
+                        .ldr = &last_ldr,
+                        .imu = &last_imu,
+                        .gps = &last_gps,
+                        .env = &last_env,
+                        .motion = &last_motion_estimate,
+                        .tracker_state =
                             current_state == STATE_IDLE ? "IDLE" :
-                            current_state == STATE_FLYING ? "FLYING" : "PROBLEM";
+                            current_state == STATE_FLYING ? "FLYING" : "PROBLEM",
+                        .simu_flags = build_simu_flags()
+                    };
 
-                        /* Complete 16-bit status flags */
-                        simu_frame_data.flags = build_simu_flags();
-
-                        /* Build and transmit frame */
-                        if (simu_build_frame(&simu_frame_data, frame, sizeof(frame)) == 0) {
-                            printk("%s", frame);
-                        }
+                    int report_error = telemetry_report(current_mode, &data);
+                    if (report_error < 0 && current_mode != MODE_SIMU) {
+                        printk("[ERROR] Telemetry report failed: %d\n", report_error);
                     }
                     break;
                 }
