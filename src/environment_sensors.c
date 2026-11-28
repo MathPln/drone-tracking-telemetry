@@ -70,13 +70,17 @@ void environment_thread_entry(void *p1, void *p2, void *p3)
     int err;
 
     if (!adc_is_ready_dt(&adc_channel)) {
+        if (!simu_mode_active) {
         printk("[Error]: LDR ADC not ready\n");
+        }
         ldr_report_fault(true, -1);
         ldr_fault_active = true;
     } else {
         err = adc_channel_setup_dt(&adc_channel);
         if (err < 0) {
+            if (!simu_mode_active) {
             printk("[Error]: ADC setup failed with code %d\n", err);
+            }
             ldr_report_fault(true, err);
             ldr_fault_active = true;
         } else {
@@ -85,7 +89,9 @@ void environment_thread_entry(void *p1, void *p2, void *p3)
     }
 
     if (!i2c_ready) {
+        if (!simu_mode_active) {
         printk("[Error]: I2C bus not ready for Si7021\n");
+        }
         environment_report_fault(true, -1);
         env_fault_active = true;
     }
@@ -137,8 +143,9 @@ void environment_thread_entry(void *p1, void *p2, void *p3)
                 };
                 k_msgq_put(&sensor_msgq, &msg, K_NO_WAIT);
             } else {
+                if (!simu_mode_active) {
                 printk("[Error]: ADC read failed with code %d\n", err);
-
+                }
                 /* Report the error only once until recovery */
                 if (!ldr_fault_active) {
                     ldr_report_fault(true, err);
@@ -161,7 +168,9 @@ void environment_thread_entry(void *p1, void *p2, void *p3)
             uint16_t raw_temp = (rx_buf[0] << 8) | rx_buf[1];
             current_data.temperature = (175.72f * (float)raw_temp / 65536.0f) - 46.85f;
         } else {
+            if (!simu_mode_active) {
             printk("[Error]: Failed to read Si7021 temperature\n");
+            }
             env_read_ok = false;
         }
 
@@ -179,7 +188,9 @@ void environment_thread_entry(void *p1, void *p2, void *p3)
                 current_data.humidity = 100.0f;
             }
         } else {
+            if (!simu_mode_active) {
             printk("[Error]: Failed to read Si7021 humidity\n");
+            }
             env_read_ok = false;
         }
 

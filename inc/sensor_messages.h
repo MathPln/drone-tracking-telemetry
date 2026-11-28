@@ -50,5 +50,7 @@ struct sensor_message {
 };
 
 extern struct k_msgq sensor_msgq;
+extern volatile bool simu_mode_active;
+
 
 #endif /* SENSOR_MESSAGES_H */
